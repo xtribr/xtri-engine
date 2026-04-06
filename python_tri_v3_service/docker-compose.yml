@@ -18,9 +18,15 @@ services:
       - "5003:5003"
     environment:
       - PYTHONUNBUFFERED=1
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+    env_file:
+      - ../.env
     volumes:
       # Hot-reload em desenvolvimento: monta o código local
       - ./app:/app/app:ro
+      # Microdata oficial INEP (read-only). Caminho no host vem do .env
+      - ${MICRODATA_PATH:-../data}:/data:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5003/health')"]
