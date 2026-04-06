@@ -275,6 +275,170 @@ class TestFrontendStatic:
         assert "XTRI Engine" in resp.text
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# V4 endpoints — INEP validation (requires Supabase)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+import os
+
+
+def _supabase_available() -> bool:
+    return bool(os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_KEY"))
+
+
+class TestV4INEPInfo:
+
+    @pytest.mark.api
+    def test_info_retorna_estrutura_quando_supabase_configurado(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        resp = client.get("/api/v4/enem/info")
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "anos_disponiveis" in body
+        assert "areas" in body
+        assert "transformacoes" in body
+        assert "total_itens" in body
+        assert "total_provas" in body
+        assert isinstance(body["anos_disponiveis"], list)
+
+    @pytest.mark.api
+    def test_info_sem_supabase_retorna_503(self, client: TestClient, monkeypatch):
+        # Remove env vars temporarily
+        monkeypatch.delenv("SUPABASE_URL", raising=False)
+        monkeypatch.delenv("SUPABASE_KEY", raising=False)
+        # Clear the cached client
+        from app.db.supabase_client import get_supabase
+        get_supabase.cache_clear()
+        resp = client.get("/api/v4/enem/info")
+        assert resp.status_code == 503
+        # Restore for other tests
+        get_supabase.cache_clear()
+
+
+class TestV4Transformacao:
+
+    @pytest.mark.api
+    def test_transformacao_valida(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        resp = client.get("/api/v4/enem/transformacao/2024/MT")
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ano"] == 2024
+        assert body["area"] == "MT"
+        assert "sigma" in body
+        assert "mu" in body
+        # Sanity: correlação deve ser ~1.0
+        assert body["correlacao"] > 0.99
+
+    @pytest.mark.api
+    def test_transformacao_ano_inexistente(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        resp = client.get("/api/v4/enem/transformacao/1999/MT")
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 404
+
+
+class TestV4ItensProva:
+
+    @pytest.mark.api
+    def test_itens_prova_valida(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        resp = client.get("/api/v4/enem/itens/2024/MT/1408")
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ano"] == 2024
+        assert body["area"] == "MT"
+        assert body["co_prova"] == 1408
+        assert len(body["itens"]) >= 40
+        # Each item should have a, b, c parameters
+        for it in body["itens"][:3]:
+            assert "a" in it
+            assert "b" in it
+            assert "c" in it
+            assert "posicao" in it
+
+
+class TestV4CalcularComINEP:
+
+    @pytest.mark.api
+    def test_calcular_com_inep_retorna_resultados(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        payload = {
+            "ano": 2024,
+            "area": "MT",
+            "co_prova": 1408,
+            "alunos": [
+                {"aluno_id": "A1", "respostas": [1] * 40 + [0] * 5},
+                {"aluno_id": "A2", "respostas": [1] * 20 + [0] * 25},
+            ],
+        }
+        resp = client.post("/api/v4/enem/calcular-com-inep", json=payload)
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "sucesso"
+        assert body["n_alunos"] == 2
+        assert len(body["resultados"]) == 2
+        assert body["transformacao_usada"]["sigma"] > 100
+        for r in body["resultados"]:
+            assert "nota_inep" in r
+            assert "theta" in r
+            assert "estado_tri" in r
+
+    @pytest.mark.api
+    def test_calcular_com_inep_area_invalida(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        payload = {
+            "ano": 2024, "area": "XX", "co_prova": 1408,
+            "alunos": [{"aluno_id": "A1", "respostas": [1] * 45}],
+        }
+        resp = client.post("/api/v4/enem/calcular-com-inep", json=payload)
+        if resp.status_code == 503:
+            pytest.skip()
+        assert resp.status_code == 400
+
+    @pytest.mark.api
+    def test_calcular_com_inep_lc_sem_lingua(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        # LC requires tp_lingua
+        payload = {
+            "ano": 2024, "area": "LC", "co_prova": 1395,
+            "alunos": [{"aluno_id": "A1", "respostas": [1] * 45}],
+        }
+        resp = client.post("/api/v4/enem/calcular-com-inep", json=payload)
+        if resp.status_code == 503:
+            pytest.skip()
+        assert resp.status_code == 400
+
+    @pytest.mark.api
+    def test_calcular_com_inep_prova_inexistente(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        payload = {
+            "ano": 2024, "area": "MT", "co_prova": 999999,
+            "alunos": [{"aluno_id": "A1", "respostas": [1] * 45}],
+        }
+        resp = client.post("/api/v4/enem/calcular-com-inep", json=payload)
+        if resp.status_code == 503:
+            pytest.skip()
+        assert resp.status_code == 404
+
+
 class TestExportarExcel:
 
     @pytest.mark.api

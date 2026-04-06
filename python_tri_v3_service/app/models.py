@@ -222,3 +222,81 @@ class ResponseProcessarCSV(BaseModel):
     referencia: List[PontoReferencia] = []
     avisos: List[str] = []
     tempo_processamento: float = 0.0
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — V4 (Validação INEP)
+# ════════════════════════════════════════════════════════════════════════════════
+
+class TransformacaoENEM(BaseModel):
+    """Transformação empírica (σ, μ) derivada dos microdados INEP."""
+    ano: int
+    area: str
+    sigma: float
+    mu: float
+    n_alunos: int
+    correlacao: float
+    mae: float
+
+
+class ItemINEP(BaseModel):
+    """Item com parâmetros oficiais do INEP."""
+    co_item: int
+    posicao: int
+    gabarito: Optional[str] = None
+    a: float
+    b: float
+    c: float
+    tp_lingua: Optional[int] = None
+    abandonado: bool = False
+
+
+class ProvaINEP(BaseModel):
+    """Prova com seus itens oficiais."""
+    ano: int
+    area: str
+    co_prova: int
+    descricao: Optional[str] = None
+    is_reaplicacao: bool = False
+    itens: List[ItemINEP]
+
+
+class ENEMInfo(BaseModel):
+    """Sumário do que está disponível no item bank ENEM."""
+    anos_disponiveis: List[int]
+    areas: List[str]
+    transformacoes: List[TransformacaoENEM]
+    total_itens: int
+    total_provas: int
+
+
+class ResultadoAlunoINEP(BaseModel):
+    """Resultado de um aluno calculado com parâmetros oficiais INEP."""
+    aluno_id: str
+    acertos: int
+    theta: float
+    nota_inep: float
+    estado_tri: str
+
+
+class RequestCalcularComINEP(BaseModel):
+    """Payload para cálculo usando parâmetros oficiais do INEP."""
+    ano: int
+    area: str
+    co_prova: int  # versão da prova (define quais itens usar)
+    tp_lingua: Optional[int] = None  # 0=inglês, 1=espanhol (obrigatório se area=LC)
+    alunos: List[RespostaAlunoCientifico]
+
+
+class ResponseCalcularComINEP(BaseModel):
+    """Response com resultados usando parâmetros oficiais INEP."""
+    status: str
+    ano: int
+    area: str
+    co_prova: int
+    n_alunos: int
+    n_itens: int
+    transformacao_usada: TransformacaoENEM
+    resultados: List[ResultadoAlunoINEP]
+    diagnostico: Dict[str, Any]
+    tempo_processamento: float

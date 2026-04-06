@@ -18,7 +18,22 @@ import time
 import traceback
 import numpy as np
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Dict, Optional
+
+# Load .env if available (from project root or current dir)
+try:
+    from dotenv import load_dotenv
+    for candidate in (
+        Path(__file__).resolve().parents[2] / ".env",  # /Volumes/KINGSTON/apps/apps/MIRT/.env
+        Path(__file__).resolve().parents[1] / ".env",  # python_tri_v3_service/.env
+        Path(".env"),
+    ):
+        if candidate.exists():
+            load_dotenv(candidate)
+            break
+except ImportError:
+    pass
 
 from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -38,6 +53,13 @@ from .models import (
     PontoReferencia,
     ResultadoAlunoFrontend,
     ResponseProcessarCSV,
+    TransformacaoENEM,
+    ItemINEP,
+    ProvaINEP,
+    ENEMInfo,
+    ResultadoAlunoINEP,
+    RequestCalcularComINEP,
+    ResponseCalcularComINEP,
 )
 from .tabela_referencia import TabelaReferenciaTRI
 from .csv_parser import parse_single_area
@@ -45,7 +67,10 @@ from .motores.heuristico import processar_turma
 from .motores.cientifico import (
     pipeline_cientifico,
     estimar_theta_individual,
+    eap_theta as eap_theta_cientifico,
+    estado_tri,
 )
+from .db.supabase_client import get_supabase, is_supabase_configured
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -600,6 +625,301 @@ async def processar_csv(
         referencia=referencia,
         avisos=avisos,
         tempo_processamento=round(elapsed, 2),
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ENDPOINTS — V4 VALIDAÇÃO INEP (usa parâmetros oficiais do Supabase)
+# ════════════════════════════════════════════════════════════════════════════════
+
+def _fetch_all_supabase(client, table: str, filter_eq: Optional[Dict] = None,
+                         select: str = "*", page_size: int = 1000):
+    """Paginate all rows from a Supabase table with optional filters."""
+    rows = []
+    offset = 0
+    while True:
+        q = client.table(table).select(select).range(offset, offset + page_size - 1)
+        if filter_eq:
+            for k, v in filter_eq.items():
+                q = q.eq(k, v)
+        r = q.execute()
+        if not r.data:
+            break
+        rows.extend(r.data)
+        if len(r.data) < page_size:
+            break
+        offset += page_size
+    return rows
+
+
+def _require_supabase():
+    """Raise HTTPException if Supabase is not configured or unreachable."""
+    if not is_supabase_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase não configurado. Defina SUPABASE_URL e SUPABASE_KEY no .env",
+        )
+    client = get_supabase()
+    if client is None:
+        raise HTTPException(status_code=503, detail="Cliente Supabase indisponível")
+    return client
+
+
+@app.get("/api/v4/enem/info", response_model=ENEMInfo)
+async def enem_info():
+    """
+    Retorna sumário do que está disponível no item bank ENEM oficial:
+    anos com transformações calibradas, totais de itens e provas.
+    """
+    client = _require_supabase()
+
+    # Transformações
+    transf_rows = _fetch_all_supabase(client, "enem_transformacoes")
+    transformacoes = [
+        TransformacaoENEM(
+            ano=r["ano"], area=r["area"],
+            sigma=float(r["sigma"]), mu=float(r["mu"]),
+            n_alunos=r["n_alunos"] or 0,
+            correlacao=float(r["correlacao"] or 0),
+            mae=float(r["mae"] or 0),
+        )
+        for r in transf_rows
+    ]
+
+    anos = sorted({t.ano for t in transformacoes})
+    areas = sorted({t.area for t in transformacoes})
+
+    # Totais
+    total_itens = client.table("enem_itens").select("id", count="exact", head=True).execute().count or 0
+    total_provas_r = client.table("enem_itens_prova").select("id", count="exact", head=True).execute().count or 0
+
+    return ENEMInfo(
+        anos_disponiveis=anos,
+        areas=areas,
+        transformacoes=sorted(transformacoes, key=lambda t: (t.ano, t.area)),
+        total_itens=total_itens,
+        total_provas=total_provas_r,
+    )
+
+
+@app.get("/api/v4/enem/transformacao/{ano}/{area}", response_model=TransformacaoENEM)
+async def enem_transformacao(ano: int, area: str):
+    """Retorna a transformação empírica (σ, μ) para um ano × área."""
+    client = _require_supabase()
+    area = area.upper()
+
+    r = client.table("enem_transformacoes").select("*").eq("ano", ano).eq("area", area).limit(1).execute()
+    if not r.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transformação não encontrada para {area}/{ano}",
+        )
+    row = r.data[0]
+    return TransformacaoENEM(
+        ano=row["ano"], area=row["area"],
+        sigma=float(row["sigma"]), mu=float(row["mu"]),
+        n_alunos=row["n_alunos"] or 0,
+        correlacao=float(row["correlacao"] or 0),
+        mae=float(row["mae"] or 0),
+    )
+
+
+@app.get("/api/v4/enem/itens/{ano}/{area}/{co_prova}", response_model=ProvaINEP)
+async def enem_itens_prova(ano: int, area: str, co_prova: int):
+    """Retorna parâmetros oficiais dos itens de uma prova específica."""
+    client = _require_supabase()
+    area = area.upper()
+
+    # Metadata da prova
+    meta_r = client.table("enem_codigos_prova").select("*").eq("ano", ano).eq("area", area).eq("co_prova", co_prova).limit(1).execute()
+    if not meta_r.data:
+        raise HTTPException(status_code=404, detail=f"Prova {co_prova} não encontrada para {area}/{ano}")
+    meta = meta_r.data[0]
+
+    # Itens da área
+    itens_area_r = client.table("enem_itens").select("*").eq("ano", ano).eq("area", area).execute()
+    itens_by_co = {it["co_item"]: it for it in itens_area_r.data}
+
+    # Mapeamentos dessa prova
+    maps_r = client.table("enem_itens_prova").select("*").eq("ano", ano).eq("co_prova", co_prova).execute()
+
+    itens = []
+    for m in maps_r.data:
+        it = itens_by_co.get(m["co_item"])
+        if not it or it.get("param_discriminacao") is None:
+            continue
+        itens.append(ItemINEP(
+            co_item=it["co_item"],
+            posicao=m["posicao"],
+            gabarito=it.get("gabarito"),
+            a=float(it["param_discriminacao"]),
+            b=float(it["param_dificuldade"]),
+            c=float(it.get("param_acerto_casual") or 0.20),
+            tp_lingua=it.get("tipo_lingua"),
+            abandonado=bool(it.get("item_abandonado")),
+        ))
+
+    if not itens:
+        raise HTTPException(status_code=404, detail=f"Nenhum item encontrado para prova {co_prova}")
+
+    itens.sort(key=lambda x: x.posicao)
+
+    return ProvaINEP(
+        ano=ano, area=area, co_prova=co_prova,
+        descricao=meta.get("descricao_categoria"),
+        is_reaplicacao=bool(meta.get("is_reaplicacao")),
+        itens=itens,
+    )
+
+
+@app.post("/api/v4/enem/calcular-com-inep", response_model=ResponseCalcularComINEP)
+async def calcular_com_inep(payload: RequestCalcularComINEP):
+    """
+    Calcula notas TRI usando parâmetros OFICIAIS do INEP (pré-calibrados).
+
+    Diferente do /api/v3/calibrar-cientifico que calibra localmente, este
+    endpoint usa os parâmetros exatos publicados pelo INEP para a prova
+    especificada + transformação empírica (σ, μ) derivada dos microdados.
+
+    Precisão: bit-a-bit equivalente ao cálculo oficial do INEP.
+    """
+    t0 = time.time()
+    client = _require_supabase()
+    area = payload.area.upper()
+    ano = payload.ano
+
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Área inválida: {area}")
+
+    # 1. Buscar a transformação (σ, μ)
+    transf_r = client.table("enem_transformacoes").select("*").eq("ano", ano).eq("area", area).limit(1).execute()
+    if not transf_r.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transformação não disponível para {area}/{ano}. Rode calcular_transformacao.py primeiro.",
+        )
+    transf_row = transf_r.data[0]
+    sigma = float(transf_row["sigma"])
+    mu = float(transf_row["mu"])
+
+    # 2. Buscar itens da prova
+    itens_area_r = client.table("enem_itens").select("*").eq("ano", ano).eq("area", area).execute()
+    itens_by_co = {it["co_item"]: it for it in itens_area_r.data}
+
+    maps_r = client.table("enem_itens_prova").select("*").eq("ano", ano).eq("co_prova", payload.co_prova).execute()
+    if not maps_r.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Prova {payload.co_prova} não encontrada para {area}/{ano}",
+        )
+
+    # Build ordered item list
+    all_items: list[dict] = []
+    for m in maps_r.data:
+        it = itens_by_co.get(m["co_item"])
+        if not it or it.get("item_abandonado"):
+            continue
+        if it.get("param_discriminacao") is None:
+            continue
+        all_items.append({
+            "posicao": m["posicao"],
+            "co_item": it["co_item"],
+            "a": float(it["param_discriminacao"]),
+            "b": float(it["param_dificuldade"]),
+            "c": float(it.get("param_acerto_casual") or 0.20),
+            "gabarito": it.get("gabarito"),
+            "tp_lingua": it.get("tipo_lingua"),
+        })
+
+    if not all_items:
+        raise HTTPException(status_code=404, detail=f"Nenhum item calibrado na prova {payload.co_prova}")
+
+    # 3. Filter by language for LC
+    if area == "LC":
+        tp_lingua = payload.tp_lingua
+        if tp_lingua not in (0, 1):
+            raise HTTPException(
+                status_code=400,
+                detail="Para área LC é obrigatório fornecer tp_lingua (0=inglês, 1=espanhol)",
+            )
+        filtered = [
+            it for it in all_items
+            if it.get("tp_lingua") is None or it.get("tp_lingua") == tp_lingua
+        ]
+    else:
+        filtered = all_items
+
+    filtered.sort(key=lambda x: x["posicao"])
+    n_itens = len(filtered)
+
+    if n_itens < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Poucos itens válidos ({n_itens}). Verifique co_prova e tp_lingua.",
+        )
+
+    # 4. Process students
+    if len(payload.alunos) < 1:
+        raise HTTPException(status_code=400, detail="Nenhum aluno fornecido")
+
+    resultados: list[ResultadoAlunoINEP] = []
+    notas = []
+    for aluno in payload.alunos:
+        if len(aluno.respostas) != n_itens:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Aluno {aluno.aluno_id}: {len(aluno.respostas)} respostas, esperado {n_itens}",
+            )
+
+        resp = np.array(aluno.respostas, dtype=int)
+        acertos = int(resp.sum())
+
+        # EAP theta using INEP's pre-calibrated parameters
+        theta, _se = eap_theta_cientifico(resp, filtered)
+
+        # Apply empirical transformation
+        nota = sigma * theta + mu
+        nota = round(float(nota), 1)
+        notas.append(nota)
+
+        resultados.append(ResultadoAlunoINEP(
+            aluno_id=aluno.aluno_id,
+            acertos=acertos,
+            theta=round(float(theta), 4),
+            nota_inep=nota,
+            estado_tri=estado_tri(nota),
+        ))
+
+    # 5. Diagnostic
+    diag = {
+        "n_alunos": len(resultados),
+        "n_itens": n_itens,
+        "nota_media": round(float(np.mean(notas)), 1),
+        "nota_min": round(float(np.min(notas)), 1),
+        "nota_max": round(float(np.max(notas)), 1),
+        "nota_desvio": round(float(np.std(notas)), 1),
+        "metodo": "INEP (parâmetros oficiais pré-calibrados)",
+    }
+
+    transformacao_model = TransformacaoENEM(
+        ano=ano, area=area,
+        sigma=sigma, mu=mu,
+        n_alunos=transf_row["n_alunos"] or 0,
+        correlacao=float(transf_row["correlacao"] or 0),
+        mae=float(transf_row["mae"] or 0),
+    )
+
+    return ResponseCalcularComINEP(
+        status="sucesso",
+        ano=ano,
+        area=area,
+        co_prova=payload.co_prova,
+        n_alunos=len(resultados),
+        n_itens=n_itens,
+        transformacao_usada=transformacao_model,
+        resultados=resultados,
+        diagnostico=diag,
+        tempo_processamento=round(time.time() - t0, 3),
     )
 
 
