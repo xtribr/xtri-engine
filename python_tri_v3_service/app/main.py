@@ -20,9 +20,9 @@ import numpy as np
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from .models import (
@@ -601,6 +601,248 @@ async def processar_csv(
         avisos=avisos,
         tempo_processamento=round(elapsed, 2),
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# ENDPOINT — EXPORTAR EXCEL
+# ════════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/v3/exportar-excel")
+async def exportar_excel(payload: Dict[str, Any] = Body(...)):
+    """
+    Generate an XLSX file with all results: students, difficulty table,
+    diagnostics, and the anchor chart as an embedded image.
+
+    Expected payload:
+      {
+        "area": "MT",
+        "ano_referencia": 2022,
+        "metodo": "Rank Intragrupo (Primi)",
+        "n_alunos": 403,
+        "resultados": [{aluno_id, acertos_mt, theta_mt, nota_mt, acert_dif_mt, estado_mt}],
+        "referencia": [{acertos, tri_min, tri_med, tri_max}],
+        "diagnosticos": [{...}],
+        "chart_png_base64": "iVBORw0KG..." (optional)
+      }
+    """
+    import base64
+    import io
+    from datetime import datetime
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+
+    try:
+        area = payload.get("area", "").upper()
+        ano = payload.get("ano_referencia", 0)
+        metodo = payload.get("metodo", "")
+        n_alunos = payload.get("n_alunos", 0)
+        resultados = payload.get("resultados", [])
+        referencia = payload.get("referencia", [])
+        diagnosticos = payload.get("diagnosticos", [])
+        chart_b64 = payload.get("chart_png_base64", "")
+
+        area_lower = area.lower()
+
+        wb = Workbook()
+
+        # Styles
+        header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF", size=11)
+        title_font = Font(bold=True, size=14, color="2C3E50")
+        subtitle_font = Font(italic=True, size=10, color="666666")
+        thin = Side(border_style="thin", color="CCCCCC")
+        border = Border(left=thin, right=thin, top=thin, bottom=thin)
+        center = Alignment(horizontal="center", vertical="center")
+        left = Alignment(horizontal="left", vertical="center")
+        right = Alignment(horizontal="right", vertical="center")
+
+        # ═══ Sheet 1: RESUMO ═══
+        ws1 = wb.active
+        ws1.title = "Resumo"
+        ws1["A1"] = "XTRI ENGINE — Relatorio de Correcao TRI"
+        ws1["A1"].font = title_font
+        ws1.merge_cells("A1:D1")
+        ws1["A2"] = f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+        ws1["A2"].font = subtitle_font
+        ws1.merge_cells("A2:D2")
+
+        ws1["A4"] = "Parametros da Correcao"
+        ws1["A4"].font = Font(bold=True, size=12, color="2C3E50")
+        params = [
+            ("Area", area),
+            ("Ano de Referencia ENEM", ano),
+            ("Metodo de Ancoragem", metodo),
+            ("Total de Alunos", n_alunos),
+        ]
+        for i, (k, v) in enumerate(params, start=5):
+            ws1[f"A{i}"] = k
+            ws1[f"A{i}"].font = Font(bold=True)
+            ws1[f"B{i}"] = v
+
+        ws1["A10"] = "Estatisticas da Turma"
+        ws1["A10"].font = Font(bold=True, size=12, color="2C3E50")
+
+        if diagnosticos:
+            d = diagnosticos[0]
+            stats = [
+                ("Nota Media", d.get("nota_media", "")),
+                ("Nota Minima", d.get("nota_min", "")),
+                ("Nota Maxima", d.get("nota_max", "")),
+                ("b medio (dificuldade media)", d.get("b_medio", "")),
+                ("b desvio padrao", d.get("b_desvio", "")),
+                ("% dentro do intervalo ENEM", f"{d.get('pct_dentro_intervalo', 0)}%"),
+                ("Itens faceis (b < -1.5)", d.get("itens_faceis", 0)),
+                ("Itens medios", d.get("itens_medios", 0)),
+                ("Itens dificeis (b > 1.5)", d.get("itens_dificeis", 0)),
+                ("acert_dif medio (Primi)", d.get("acert_dif_medio", 0)),
+            ]
+            for i, (k, v) in enumerate(stats, start=11):
+                ws1[f"A{i}"] = k
+                ws1[f"A{i}"].font = Font(bold=True)
+                ws1[f"B{i}"] = v
+
+        # Classification counts
+        niveis_count: Dict[str, int] = {}
+        for r in resultados:
+            est = r.get(f"estado_{area_lower}")
+            if est:
+                niveis_count[est] = niveis_count.get(est, 0) + 1
+
+        ws1["A23"] = "Distribuicao por Nivel Pedagogico"
+        ws1["A23"].font = Font(bold=True, size=12, color="2C3E50")
+        ordem = ["AVANCADO", "PROFICIENTE", "BASICO", "ELEMENTAR", "INICIANTE"]
+        for i, nivel in enumerate(ordem, start=24):
+            ws1[f"A{i}"] = nivel
+            ws1[f"A{i}"].font = Font(bold=True)
+            ws1[f"B{i}"] = niveis_count.get(nivel, 0)
+            if n_alunos > 0:
+                ws1[f"C{i}"] = f"{niveis_count.get(nivel, 0) / n_alunos * 100:.1f}%"
+
+        ws1.column_dimensions["A"].width = 35
+        ws1.column_dimensions["B"].width = 18
+        ws1.column_dimensions["C"].width = 12
+
+        # ═══ Sheet 2: ALUNOS ═══
+        ws2 = wb.create_sheet("Alunos")
+        headers = ["ID", "Acertos", "Theta", "Nota TRI", "% Dificeis (acert_dif)", "Nivel"]
+        for col_idx, h in enumerate(headers, start=1):
+            cell = ws2.cell(row=1, column=col_idx, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center
+            cell.border = border
+
+        for row_idx, r in enumerate(resultados, start=2):
+            ws2.cell(row=row_idx, column=1, value=r.get("aluno_id", ""))
+            ws2.cell(row=row_idx, column=2, value=r.get(f"acertos_{area_lower}"))
+            ws2.cell(row=row_idx, column=3, value=r.get(f"theta_{area_lower}"))
+            ws2.cell(row=row_idx, column=4, value=r.get(f"nota_{area_lower}"))
+            ws2.cell(row=row_idx, column=5, value=r.get(f"acert_dif_{area_lower}"))
+            ws2.cell(row=row_idx, column=6, value=r.get(f"estado_{area_lower}"))
+            for c in range(1, 7):
+                ws2.cell(row=row_idx, column=c).border = border
+                ws2.cell(row=row_idx, column=c).alignment = center if c > 1 else left
+
+        ws2.column_dimensions["A"].width = 15
+        ws2.column_dimensions["B"].width = 10
+        ws2.column_dimensions["C"].width = 12
+        ws2.column_dimensions["D"].width = 12
+        ws2.column_dimensions["E"].width = 22
+        ws2.column_dimensions["F"].width = 15
+        ws2.freeze_panes = "A2"
+
+        # ═══ Sheet 3: TABELA DIFICULDADES ═══
+        ws3 = wb.create_sheet("Tabela Dificuldades")
+        ws3["A1"] = f"Tabela de Dificuldades — {area} / ENEM {ano}"
+        ws3["A1"].font = title_font
+        ws3.merge_cells("A1:G1")
+        ws3["A2"] = "Comparacao entre a distribuicao do simulado e os limites oficiais ENEM"
+        ws3["A2"].font = subtitle_font
+        ws3.merge_cells("A2:G2")
+
+        from collections import defaultdict
+        freq_ac: Dict[int, int] = defaultdict(int)
+        notas_ac: Dict[int, list] = defaultdict(list)
+        for r in resultados:
+            ac = r.get(f"acertos_{area_lower}")
+            nota = r.get(f"nota_{area_lower}")
+            if ac is not None and nota is not None:
+                freq_ac[ac] += 1
+                notas_ac[ac].append(nota)
+
+        table_headers = ["Acertos", "Freq Simulado", "Ref Min", "Ref Med", "Ref Max", "Nota Sim (media)", "Nota Sim (min-max)"]
+        for col_idx, h in enumerate(table_headers, start=1):
+            cell = ws3.cell(row=4, column=col_idx, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = center
+            cell.border = border
+
+        for i, p in enumerate(referencia, start=5):
+            ac = p["acertos"]
+            f = freq_ac.get(ac, 0)
+            ns = notas_ac.get(ac, [])
+            ws3.cell(row=i, column=1, value=ac)
+            ws3.cell(row=i, column=2, value=f)
+            ws3.cell(row=i, column=3, value=p["tri_min"])
+            ws3.cell(row=i, column=4, value=p["tri_med"])
+            ws3.cell(row=i, column=5, value=p["tri_max"])
+            if ns:
+                avg = sum(ns) / len(ns)
+                ws3.cell(row=i, column=6, value=round(avg, 1))
+                ws3.cell(row=i, column=7, value=f"{min(ns):.0f} - {max(ns):.0f}")
+            for c in range(1, 8):
+                ws3.cell(row=i, column=c).border = border
+                ws3.cell(row=i, column=c).alignment = center
+
+        ws3.column_dimensions["A"].width = 10
+        ws3.column_dimensions["B"].width = 14
+        ws3.column_dimensions["C"].width = 12
+        ws3.column_dimensions["D"].width = 12
+        ws3.column_dimensions["E"].width = 12
+        ws3.column_dimensions["F"].width = 18
+        ws3.column_dimensions["G"].width = 20
+        ws3.freeze_panes = "A5"
+
+        # ═══ Sheet 4: GRAFICO (if chart image provided) ═══
+        if chart_b64:
+            try:
+                from openpyxl.drawing.image import Image as XLImage
+                # Strip data URL prefix if present
+                if "," in chart_b64:
+                    chart_b64 = chart_b64.split(",", 1)[1]
+                img_bytes = base64.b64decode(chart_b64)
+                img_stream = io.BytesIO(img_bytes)
+                ws4 = wb.create_sheet("Grafico")
+                ws4["A1"] = f"Grafico de Ancoragem — {area} / ENEM {ano}"
+                ws4["A1"].font = title_font
+                ws4.merge_cells("A1:H1")
+                xlimg = XLImage(img_stream)
+                # Resize to fit
+                xlimg.width = 900
+                xlimg.height = 520
+                ws4.add_image(xlimg, "A3")
+            except Exception as e:
+                print(f"[EXCEL] Failed to embed chart image: {e}")
+
+        # Save to bytes
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        filename = f"xtri_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    except Exception as e:
+        error_trace = traceback.format_exc()
+        print(f"[EXCEL] ERROR: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar Excel: {e}")
 
 
 # ════════════════════════════════════════════════════════════════════════════════

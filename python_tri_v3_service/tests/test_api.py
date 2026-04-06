@@ -273,3 +273,66 @@ class TestFrontendStatic:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
         assert "XTRI Engine" in resp.text
+
+
+class TestExportarExcel:
+
+    @pytest.mark.api
+    def test_exportar_excel_retorna_xlsx(self, client: TestClient):
+        # First process a CSV to get real data
+        csv_content = _make_single_area_csv(30)
+        anos = client.get("/api/v3/anos-referencia").json()
+        ano = anos[-1]
+        proc = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": ("mt.csv", csv_content, "text/csv")},
+        )
+        data = proc.json()
+
+        payload = {
+            "area": "MT",
+            "ano_referencia": ano,
+            "metodo": "Rank Intragrupo (Primi)",
+            "n_alunos": data["n_alunos"],
+            "resultados": data["resultados"],
+            "referencia": data["referencia"],
+            "diagnosticos": data["diagnosticos"],
+        }
+
+        resp = client.post("/api/v3/exportar-excel", json=payload)
+        assert resp.status_code == 200
+        assert "spreadsheetml" in resp.headers["content-type"]
+        assert "attachment" in resp.headers["content-disposition"]
+        assert len(resp.content) > 1000  # non-trivial xlsx file
+
+    @pytest.mark.api
+    def test_exportar_excel_com_grafico_base64(self, client: TestClient):
+        # Minimal valid 1x1 PNG in base64
+        png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAIAAAoAAv/lxKUAAAAASUVORK5CYII="
+        payload = {
+            "area": "MT",
+            "ano_referencia": 2022,
+            "metodo": "Test",
+            "n_alunos": 2,
+            "resultados": [
+                {"aluno_id": "A1", "acertos_mt": 20, "theta_mt": 0.5, "nota_mt": 600.0, "acert_dif_mt": 0.3, "estado_mt": "PROFICIENTE"},
+                {"aluno_id": "A2", "acertos_mt": 30, "theta_mt": 1.5, "nota_mt": 750.0, "acert_dif_mt": 0.7, "estado_mt": "AVANCADO"},
+            ],
+            "referencia": [
+                {"acertos": 20, "tri_min": 500.0, "tri_med": 600.0, "tri_max": 700.0},
+                {"acertos": 30, "tri_min": 650.0, "tri_med": 750.0, "tri_max": 850.0},
+            ],
+            "diagnosticos": [{
+                "area": "MT", "n_itens": 45, "n_alunos": 2, "b_medio": 0.0,
+                "b_desvio": 1.0, "nota_media": 675.0, "nota_min": 600.0,
+                "nota_max": 750.0, "pct_dentro_intervalo": 100.0,
+                "itens_faceis": 15, "itens_medios": 20, "itens_dificeis": 10,
+                "acert_dif_medio": 0.5,
+            }],
+            "chart_png_base64": png_b64,
+        }
+
+        resp = client.post("/api/v3/exportar-excel", json=payload)
+        assert resp.status_code == 200
+        assert len(resp.content) > 1000

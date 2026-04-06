@@ -102,6 +102,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
     <div class="form-row">
       <button class="btn btn-primary" id="btnProcess" disabled>Processar</button>
       <button class="btn btn-success" id="btnDownload" style="display:none">Baixar CSV</button>
+      <button class="btn btn-success" id="btnDownloadExcel" style="display:none;background:#217346">Baixar Excel</button>
     </div>
   </div>
 
@@ -275,7 +276,7 @@ async function doProcess(cOverride){
   $('#statusMsg').textContent='Calibrando '+area+' (c='+c.toFixed(2)+')...';
   $('#status').classList.add('active');$('#errorBox').classList.remove('active');
   $('#warningsBox').classList.remove('active');$('#results').classList.remove('active');
-  $('#btnDownload').style.display='none';$('#btnProcess').disabled=true;
+  $('#btnDownload').style.display='none';$('#btnDownloadExcel').style.display='none';$('#btnProcess').disabled=true;
   try{
     const resp=await fetch('/api/v3/processar-csv',{method:'POST',body:fd});
     const data=await resp.json();
@@ -361,7 +362,7 @@ function reanchor(){
 
   // Reference / Difficulty table (like ENEM 2024 PDF)
   renderRefTable(adjusted);
-  $('#results').classList.add('active');$('#btnDownload').style.display='inline-block';
+  $('#results').classList.add('active');$('#btnDownload').style.display='inline-block';$('#btnDownloadExcel').style.display='inline-block';
 }
 
 // ── Slider events ──
@@ -623,6 +624,58 @@ $('#btnDownload').addEventListener('click',()=>{
   resultData.resultados.forEach(r=>{csv+=[r.aluno_id,r['acertos_'+al]!=null?r['acertos_'+al]:'',r['theta_'+al]!=null?r['theta_'+al]:'',r['nota_'+al]!=null?String(r['nota_'+al]).replace('.',','):'',r['acert_dif_'+al]!=null?String(r['acert_dif_'+al]).replace('.',','):'',r['estado_'+al]||''].join(';')+'\n'});
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);
   const a=document.createElement('a');a.href=url;a.download='resultados_'+area+'_'+resultData.ano_referencia+'_'+Date.now()+'.csv';a.click();URL.revokeObjectURL(url);
+});
+
+// ── Download Excel ──
+$('#btnDownloadExcel').addEventListener('click',async()=>{
+  if(!resultData)return;
+  const btn=$('#btnDownloadExcel');
+  const origText=btn.textContent;
+  btn.textContent='Gerando...';btn.disabled=true;
+
+  try{
+    // Capture the current chart as PNG
+    const canvas=$('#anchorChart');
+    const chartPng=canvas.toDataURL('image/png');
+
+    const methodLabel=$('#anchorMethod').options[$('#anchorMethod').selectedIndex].text;
+
+    const payload={
+      area:currentArea,
+      ano_referencia:resultData.ano_referencia,
+      metodo:methodLabel,
+      n_alunos:resultData.n_alunos,
+      resultados:resultData.resultados,
+      referencia:resultData.referencia,
+      diagnosticos:resultData.diagnosticos,
+      chart_png_base64:chartPng
+    };
+
+    const resp=await fetch('/api/v3/exportar-excel',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)
+    });
+
+    if(!resp.ok){
+      const err=await resp.json().catch(()=>({detail:'Erro'}));
+      throw new Error(err.detail||'Erro ao gerar Excel');
+    }
+
+    const blob=await resp.blob();
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='xtri_'+currentArea+'_'+resultData.ano_referencia+'_'+Date.now()+'.xlsx';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }catch(e){
+    alert('Erro ao gerar Excel: '+e.message);
+  }finally{
+    btn.textContent=origText;btn.disabled=false;
+  }
 });
 </script>
 </body>
