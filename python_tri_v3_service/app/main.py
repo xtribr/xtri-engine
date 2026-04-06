@@ -60,6 +60,9 @@ from .models import (
     ResultadoAlunoINEP,
     RequestCalcularComINEP,
     ResponseCalcularComINEP,
+    ResultadoComparacao,
+    EstatisticasComparacao,
+    ResponseValidarSimulado,
 )
 from .tabela_referencia import TabelaReferenciaTRI
 from .csv_parser import parse_single_area
@@ -923,6 +926,230 @@ async def calcular_com_inep(payload: RequestCalcularComINEP):
     )
 
 
+@app.post("/api/v4/enem/validar-simulado", response_model=ResponseValidarSimulado)
+async def validar_simulado(
+    area: str = Form(...),
+    ano: int = Form(...),
+    co_prova: int = Form(...),
+    arquivo: UploadFile = File(...),
+    tp_lingua: Optional[int] = Form(None),
+):
+    """
+    Valida um simulado executando dois cálculos paralelos nos MESMOS alunos:
+
+    1. V3 — Calibração LOCAL do XTRI Engine (calibra itens do próprio simulado)
+    2. V4 — Parâmetros OFICIAIS INEP (do Supabase) + transformação empírica
+
+    Retorna comparação lado-a-lado para medir o quão próximo nossa calibração
+    local está do ground truth INEP.
+    """
+    t0 = time.time()
+    area = area.upper()
+    avisos: list[str] = []
+
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Área inválida: {area}")
+
+    if area == "LC" and tp_lingua not in (0, 1):
+        raise HTTPException(
+            status_code=400,
+            detail="Para área LC é obrigatório fornecer tp_lingua (0=inglês, 1=espanhol)",
+        )
+
+    client = _require_supabase()
+
+    # ── 1. Parse upload ──
+    raw = await arquivo.read()
+    filename = (arquivo.filename or "").lower()
+    is_xlsx = filename.endswith(".xlsx") or filename.endswith(".xls")
+    try:
+        if is_xlsx:
+            parsed = parse_single_area(raw, is_xlsx=True)
+        else:
+            try:
+                content = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                content = raw.decode("latin-1")
+            parsed = parse_single_area(content, is_xlsx=False)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Erro no parsing: {e}")
+
+    avisos.extend(parsed["avisos"])
+    alunos_parsed = parsed["alunos"]
+    if len(alunos_parsed) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mínimo 10 alunos. Recebido: {len(alunos_parsed)}",
+        )
+
+    # ── 2. Load INEP item bank for the specified prova ──
+    transf_r = client.table("enem_transformacoes").select("*").eq("ano", ano).eq("area", area).limit(1).execute()
+    if not transf_r.data:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Transformação empírica não disponível para {area}/{ano}",
+        )
+    transf_row = transf_r.data[0]
+    sigma = float(transf_row["sigma"])
+    mu = float(transf_row["mu"])
+
+    itens_area_r = client.table("enem_itens").select("*").eq("ano", ano).eq("area", area).execute()
+    itens_by_co = {it["co_item"]: it for it in itens_area_r.data}
+
+    maps_r = client.table("enem_itens_prova").select("*").eq("ano", ano).eq("co_prova", co_prova).execute()
+    if not maps_r.data:
+        raise HTTPException(status_code=404, detail=f"Prova {co_prova} não encontrada para {area}/{ano}")
+
+    all_items: list[dict] = []
+    for m in maps_r.data:
+        it = itens_by_co.get(m["co_item"])
+        if not it or it.get("item_abandonado") or it.get("param_discriminacao") is None:
+            continue
+        all_items.append({
+            "posicao": m["posicao"],
+            "co_item": it["co_item"],
+            "a": float(it["param_discriminacao"]),
+            "b": float(it["param_dificuldade"]),
+            "c": float(it.get("param_acerto_casual") or 0.20),
+            "gabarito": it.get("gabarito"),
+            "tp_lingua": it.get("tipo_lingua"),
+        })
+
+    if area == "LC":
+        inep_items = [it for it in all_items if it.get("tp_lingua") is None or it.get("tp_lingua") == tp_lingua]
+    else:
+        inep_items = all_items
+
+    inep_items.sort(key=lambda x: x["posicao"])
+    n_itens = len(inep_items)
+
+    if n_itens < 10:
+        raise HTTPException(status_code=400, detail=f"Poucos itens INEP válidos: {n_itens}")
+
+    # ── 3. Validate response lengths ──
+    if parsed["n_itens"] != n_itens:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Arquivo tem {parsed['n_itens']} itens por aluno, "
+                f"prova INEP {co_prova} tem {n_itens} itens. Verifique se o arquivo "
+                f"corresponde à prova certa."
+            ),
+        )
+
+    # ── 4. Run V3 — local calibration ──
+    tabela = tabelas_multiano.get(ano) or tabelas_multiano.get(2022)
+    if tabela is None:
+        raise HTTPException(status_code=500, detail="Tabela de referência multi-ano não carregada")
+
+    alunos_motor = [
+        {"aluno_id": a["aluno_id"], "nome": "", "respostas": a["respostas"]}
+        for a in alunos_parsed
+    ]
+
+    try:
+        resultado_v3 = pipeline_cientifico(
+            alunos=alunos_motor,
+            area=area,
+            tabela=tabela,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na calibração V3: {e}")
+
+    v3_by_id = {r["aluno_id"]: r for r in resultado_v3["resultados_alunos"]}
+
+    # ── 5. Run V4 — INEP official parameters ──
+    v4_results: Dict[str, Dict[str, Any]] = {}
+    for aluno in alunos_parsed:
+        resp = np.array(aluno["respostas"], dtype=int)
+        acertos = int(resp.sum())
+        theta, _se = eap_theta_cientifico(resp, inep_items)
+        nota = sigma * theta + mu
+        nota = round(float(nota), 1)
+        v4_results[aluno["aluno_id"]] = {
+            "theta": round(float(theta), 4),
+            "nota": nota,
+            "estado": estado_tri(nota),
+            "acertos": acertos,
+        }
+
+    # ── 6. Build comparison ──
+    comparacoes: list[ResultadoComparacao] = []
+    diffs = []
+    concordancia = 0
+    notas_v3_list = []
+    notas_v4_list = []
+
+    for aluno in alunos_parsed:
+        aid = aluno["aluno_id"]
+        v3 = v3_by_id.get(aid)
+        v4 = v4_results.get(aid)
+        if not v3 or not v4:
+            continue
+        nota_v3 = v3["nota_ancorada"]
+        nota_v4 = v4["nota"]
+        diff = nota_v3 - nota_v4
+        diffs.append(diff)
+        notas_v3_list.append(nota_v3)
+        notas_v4_list.append(nota_v4)
+        if v3["estado_tri"] == v4["estado"]:
+            concordancia += 1
+
+        comparacoes.append(ResultadoComparacao(
+            aluno_id=aid,
+            acertos=v4["acertos"],
+            theta_v3=round(float(v3["theta"]), 4),
+            nota_v3=round(float(nota_v3), 1),
+            estado_v3=v3["estado_tri"],
+            theta_v4=v4["theta"],
+            nota_v4=nota_v4,
+            estado_v4=v4["estado"],
+            diff=round(float(diff), 2),
+        ))
+
+    diffs_arr = np.array(diffs)
+    notas_v3_arr = np.array(notas_v3_list)
+    notas_v4_arr = np.array(notas_v4_list)
+
+    # Correlation (handle edge cases)
+    if len(notas_v3_arr) >= 2 and notas_v3_arr.std() > 0 and notas_v4_arr.std() > 0:
+        correlacao = float(np.corrcoef(notas_v3_arr, notas_v4_arr)[0, 1])
+    else:
+        correlacao = 0.0
+
+    estatisticas = EstatisticasComparacao(
+        n_alunos=len(comparacoes),
+        mae=round(float(np.mean(np.abs(diffs_arr))), 2),
+        rmse=round(float(np.sqrt(np.mean(diffs_arr ** 2))), 2),
+        correlacao=round(correlacao, 6),
+        mean_diff=round(float(np.mean(diffs_arr)), 2),
+        max_diff_abs=round(float(np.max(np.abs(diffs_arr))), 2),
+        pct_concordancia_nivel=round(concordancia / len(comparacoes) * 100, 2) if comparacoes else 0.0,
+        nota_media_v3=round(float(np.mean(notas_v3_arr)), 1),
+        nota_media_v4=round(float(np.mean(notas_v4_arr)), 1),
+    )
+
+    transformacao_model = TransformacaoENEM(
+        ano=ano, area=area,
+        sigma=sigma, mu=mu,
+        n_alunos=transf_row["n_alunos"] or 0,
+        correlacao=float(transf_row["correlacao"] or 0),
+        mae=float(transf_row["mae"] or 0),
+    )
+
+    return ResponseValidarSimulado(
+        status="sucesso",
+        ano=ano, area=area, co_prova=co_prova,
+        n_alunos=len(comparacoes),
+        n_itens=n_itens,
+        transformacao_inep=transformacao_model,
+        estatisticas=estatisticas,
+        resultados=comparacoes,
+        avisos=avisos,
+        tempo_processamento=round(time.time() - t0, 3),
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # ENDPOINT — EXPORTAR EXCEL
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1176,6 +1403,12 @@ _static_dir = os.path.join(os.path.dirname(__file__), "static")
 async def frontend():
     """Serve the frontend application."""
     return FileResponse(os.path.join(_static_dir, "index.html"))
+
+
+@app.get("/validator", include_in_schema=False)
+async def frontend_validator():
+    """Serve the INEP validator page."""
+    return FileResponse(os.path.join(_static_dir, "validator.html"))
 
 
 if os.path.isdir(_static_dir):

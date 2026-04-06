@@ -439,6 +439,69 @@ class TestV4CalcularComINEP:
         assert resp.status_code == 404
 
 
+class TestV4ValidarSimulado:
+
+    @pytest.mark.api
+    def test_validar_simulado_basico(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        # Build a synthetic CSV for MT with 15 students, 45 items
+        import numpy as np
+        rng = np.random.default_rng(42)
+        headers = ["ID"] + [str(i + 136) for i in range(45)]
+        rows = [",".join(headers)]
+        for i in range(15):
+            row = [f"S{i:03d}"] + [str(int(rng.random() > 0.5)) for _ in range(45)]
+            rows.append(",".join(row))
+        csv_content = "\n".join(rows)
+
+        resp = client.post(
+            "/api/v4/enem/validar-simulado",
+            data={"ano": "2024", "area": "MT", "co_prova": "1408"},
+            files={"arquivo": ("test.csv", csv_content, "text/csv")},
+        )
+        if resp.status_code == 503:
+            pytest.skip("Supabase indisponível")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "sucesso"
+        assert body["n_alunos"] == 15
+        assert "estatisticas" in body
+        assert "transformacao_inep" in body
+        assert "resultados" in body
+        s = body["estatisticas"]
+        assert "correlacao" in s
+        assert "mae" in s
+        assert "rmse" in s
+
+    @pytest.mark.api
+    def test_validar_simulado_menos_10_alunos(self, client: TestClient):
+        if not _supabase_available():
+            pytest.skip("Supabase não configurado")
+        headers = ["ID"] + [str(i + 136) for i in range(45)]
+        rows = [",".join(headers)]
+        for i in range(5):
+            rows.append(",".join([f"S{i}"] + ["1"] * 45))
+        resp = client.post(
+            "/api/v4/enem/validar-simulado",
+            data={"ano": "2024", "area": "MT", "co_prova": "1408"},
+            files={"arquivo": ("test.csv", "\n".join(rows), "text/csv")},
+        )
+        if resp.status_code == 503:
+            pytest.skip()
+        assert resp.status_code == 400
+
+
+class TestValidatorPage:
+
+    @pytest.mark.api
+    def test_validator_html_served(self, client: TestClient):
+        resp = client.get("/validator")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]
+        assert "XTRI Validator" in resp.text
+
+
 class TestExportarExcel:
 
     @pytest.mark.api

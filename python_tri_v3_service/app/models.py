@@ -300,3 +300,47 @@ class ResponseCalcularComINEP(BaseModel):
     resultados: List[ResultadoAlunoINEP]
     diagnostico: Dict[str, Any]
     tempo_processamento: float
+
+
+class ResultadoComparacao(BaseModel):
+    """Resultado de um aluno comparando V3 (local) vs V4 (INEP)."""
+    aluno_id: str
+    acertos: int
+    # V3: calibração local
+    theta_v3: float
+    nota_v3: float
+    estado_v3: str
+    # V4: parâmetros oficiais INEP
+    theta_v4: float
+    nota_v4: float
+    estado_v4: str
+    # Diferença
+    diff: float
+
+
+class EstatisticasComparacao(BaseModel):
+    """Estatísticas agregadas da comparação V3 vs V4."""
+    n_alunos: int
+    mae: float
+    rmse: float
+    correlacao: float
+    mean_diff: float
+    max_diff_abs: float
+    pct_concordancia_nivel: float
+    nota_media_v3: float
+    nota_media_v4: float
+
+
+class ResponseValidarSimulado(BaseModel):
+    """Response do endpoint de validação V3 vs V4."""
+    status: str
+    ano: int
+    area: str
+    co_prova: int
+    n_alunos: int
+    n_itens: int
+    transformacao_inep: TransformacaoENEM
+    estatisticas: EstatisticasComparacao
+    resultados: List[ResultadoComparacao]
+    avisos: List[str] = []
+    tempo_processamento: float

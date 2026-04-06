@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XTRI Validator — Comparação vs INEP</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>V</text></svg>">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f6fa;color:#333;min-height:100vh}
+header{background:linear-gradient(135deg,#1e3c72 0%,#2a5298 100%);color:#fff;padding:1.2rem 2rem;display:flex;align-items:center;gap:1rem}
+header h1{font-size:1.4rem;font-weight:700}
+header span{font-size:.85rem;opacity:.75}
+header .nav{margin-left:auto;font-size:.85rem}
+header .nav a{color:#fff;text-decoration:none;opacity:.7;padding:.3rem .7rem;border-radius:4px}
+header .nav a:hover{opacity:1;background:rgba(255,255,255,0.1)}
+.container{max-width:1400px;margin:0 auto;padding:1.5rem}
+.card{background:#fff;border-radius:8px;padding:1.5rem;margin-bottom:1.5rem;border:1px solid #ddd}
+.card h2{font-size:1.1rem;margin-bottom:1rem;color:#2c3e50}
+.info-banner{background:#e8f0fe;border:1px solid #4285f4;border-radius:6px;padding:.9rem 1.2rem;margin-bottom:1.5rem;font-size:.88rem;color:#1a3a6c}
+.info-banner strong{color:#1e3c72}
+.form-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.form-row label{font-weight:600;font-size:.88rem;min-width:90px}
+.form-row select,.form-row input[type=number]{padding:.5rem 1rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem;min-width:120px}
+.drop-zone{border:2px dashed #ddd;border-radius:6px;padding:2rem;text-align:center;cursor:pointer;transition:all .2s;background:#fafafa;position:relative;margin-bottom:1rem}
+.drop-zone:hover,.drop-zone.dragover{border-color:#4285f4;background:#f0f7ff}
+.drop-zone.has-file{border-color:#27ae60;background:#f0fff4}
+.drop-zone input[type="file"]{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop-zone .lbl{font-weight:600;color:#2c3e50;margin-bottom:.3rem}
+.drop-zone .sub{font-size:.85rem;color:#888}
+.drop-zone .fname{font-size:.85rem;color:#27ae60;font-weight:600;margin-top:.5rem}
+.btn{padding:.6rem 1.5rem;border:none;border-radius:4px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:#4285f4;color:#fff}
+.btn-primary:hover:not(:disabled){background:#1a73e8}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.status{text-align:center;padding:2rem;display:none}
+.status.active{display:block}
+.spinner{display:inline-block;width:32px;height:32px;border:3px solid #ddd;border-top-color:#4285f4;border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.status p{margin-top:.5rem;color:#888}
+.error{background:#f8d7da;border:1px solid #e74c3c;border-radius:6px;padding:1rem;margin-bottom:1rem;color:#721c24;display:none}
+.error.active{display:block}
+.warnings{background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:.8rem 1rem;margin-bottom:1rem;display:none}
+.warnings.active{display:block}
+.warnings summary{cursor:pointer;font-weight:600;font-size:.9rem;color:#856404}
+.warnings ul{margin:.5rem 0 0 1.2rem;font-size:.8rem;color:#856404}
+.results{display:none}
+.results.active{display:block}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.8rem;margin-bottom:1.5rem}
+.metric{background:#fff;border:1px solid #ddd;border-radius:6px;padding:1rem}
+.metric .v{font-size:1.5rem;font-weight:700;color:#1e3c72}
+.metric .l{font-size:.72rem;color:#888;text-transform:uppercase;margin-top:.2rem}
+.metric.highlight{background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);border-color:#4285f4}
+.metric.highlight .v{color:#1a73e8}
+.table-wrap{background:#fff;border:1px solid #ddd;border-radius:8px;overflow:auto;max-height:60vh}
+table{width:100%;border-collapse:collapse;font-size:.83rem}
+thead{position:sticky;top:0;z-index:1}
+th{background:#1e3c72;color:#fff;padding:.55rem .6rem;text-align:left;white-space:nowrap}
+td{padding:.45rem .6rem;border-bottom:1px solid #eee;white-space:nowrap}
+tr:hover td{background:#f8f9fa}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.72rem;font-weight:600;color:#fff}
+.b-AVANCADO{background:#27ae60}.b-PROFICIENTE{background:#3498db}.b-BASICO{background:#f39c12}.b-ELEMENTAR{background:#e74c3c}.b-INICIANTE{background:#95a5a6}
+.diff-cell{font-weight:700}
+.diff-low{color:#27ae60}
+.diff-med{color:#f39c12}
+.diff-high{color:#e74c3c}
+.match{color:#27ae60;font-weight:700}
+.nomatch{color:#e74c3c;font-weight:700}
+footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
+#scatterWrap{background:#fff;border:1px solid #ddd;border-radius:8px;padding:1rem;margin-bottom:1.5rem}
+#scatterCanvas{display:block;margin:0 auto;max-width:100%}
+.area-info{font-size:.85rem;color:#666;margin-top:.3rem;line-height:1.4}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>XTRI Validator</h1>
+  <span>Comparação V3 (local) vs V4 (INEP oficial)</span>
+  <nav class="nav">
+    <a href="/">← Motor Principal</a>
+    <a href="/validator" style="opacity:1">Validator</a>
+  </nav>
+</header>
+
+<div class="container">
+
+  <div class="info-banner">
+    <strong>O que esta página faz:</strong> Você sobe um simulado e informa a qual prova ENEM ele corresponde.
+    O sistema executa DOIS cálculos paralelos nos mesmos alunos:
+    <br>• <strong>V3</strong> — calibração LOCAL dos itens usando MML + L-BFGS-B (o que fazemos sem o gabarito oficial)
+    <br>• <strong>V4</strong> — parâmetros OFICIAIS do INEP + transformação empírica (ground truth)
+    <br>A comparação mede a precisão da calibração local vs o cálculo oficial.
+  </div>
+
+  <div class="card">
+    <h2>Upload do Simulado</h2>
+
+    <div class="form-row">
+      <label for="ano">Ano ENEM:</label>
+      <select id="ano"><option>Carregando...</option></select>
+
+      <label for="area">Área:</label>
+      <select id="area">
+        <option value="CH">CH - Humanas</option>
+        <option value="CN">CN - Natureza</option>
+        <option value="LC">LC - Linguagens</option>
+        <option value="MT" selected>MT - Matemática</option>
+      </select>
+
+      <label for="coProva">CO_PROVA:</label>
+      <select id="coProva"><option>Carregando...</option></select>
+    </div>
+
+    <div class="form-row" id="linguaRow" style="display:none">
+      <label for="tpLingua">Idioma:</label>
+      <select id="tpLingua">
+        <option value="0">Inglês</option>
+        <option value="1">Espanhol</option>
+      </select>
+      <span class="area-info">Apenas para LC — as 5 primeiras questões são de língua estrangeira</span>
+    </div>
+
+    <div class="drop-zone" id="dropZone">
+      <div class="lbl">Arraste o arquivo aqui ou clique para selecionar</div>
+      <div class="sub">CSV ou XLSX com respostas binárias (0/1). Número de itens por aluno deve bater com a prova selecionada.</div>
+      <div class="fname" id="fname"></div>
+      <input type="file" accept=".csv,.xlsx,.xls" id="fileInput">
+    </div>
+
+    <div class="form-row">
+      <button class="btn btn-primary" id="btnProcess" disabled>Validar Simulado</button>
+    </div>
+  </div>
+
+  <div class="status" id="status">
+    <div class="spinner"></div>
+    <p id="statusMsg">Executando V3 (calibração local) + V4 (INEP oficial)...</p>
+  </div>
+
+  <div class="error" id="errorBox"></div>
+  <details class="warnings" id="warningsBox"><summary>Avisos (<span id="warnCount">0</span>)</summary><ul id="warnList"></ul></details>
+
+  <div class="results" id="results">
+    <div class="card">
+      <h2>Métricas da Validação</h2>
+      <div class="metric-grid" id="metricGrid"></div>
+    </div>
+
+    <div class="card" id="scatterWrap">
+      <h2>V3 vs V4 — Dispersão</h2>
+      <canvas id="scatterCanvas" width="900" height="500"></canvas>
+      <div style="text-align:center;font-size:.8rem;color:#666;margin-top:.5rem">
+        Cada ponto é um aluno. A linha diagonal é a igualdade perfeita (V3 = V4).
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Transformação Empírica INEP Usada</h2>
+      <div id="transfInfo" style="font-size:.9rem;line-height:1.6"></div>
+    </div>
+
+    <div class="card">
+      <h2>Comparação por Aluno</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Acertos</th>
+              <th>Theta V3</th>
+              <th>Theta V4</th>
+              <th>Nota V3</th>
+              <th>Nota V4</th>
+              <th>Diff</th>
+              <th>Nível V3</th>
+              <th>Nível V4</th>
+              <th>Match</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<footer>XTRI Validator v4 | Validação empírica vs INEP ENEM 2022-2024</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+let provasDisponiveis = {};  // ano → {area → [co_provas]}
+
+// ── Load available years ──
+fetch('/api/v4/enem/info').then(r => r.json()).then(data => {
+  if (!data.anos_disponiveis) throw new Error('Sem anos disponíveis');
+  const sel = $('#ano');
+  sel.innerHTML = '';
+  data.anos_disponiveis.forEach(a => {
+    const opt = document.createElement('option');
+    opt.value = a; opt.textContent = a;
+    sel.appendChild(opt);
+  });
+  sel.value = data.anos_disponiveis[data.anos_disponiveis.length - 1];
+  loadProvas();
+}).catch(e => {
+  $('#ano').innerHTML = '<option>Erro: ' + e.message + '</option>';
+});
+
+async function loadProvas() {
+  const ano = $('#ano').value;
+  const area = $('#area').value;
+  if (!ano || !area) return;
+
+  // Fetch prova list via enem info — but it doesn't return co_provas
+  // Alternative: backend lookup via a new endpoint, or enumerate via enem_codigos_prova
+  // For now, fetch info and let user type CO_PROVA if dropdown is empty
+  const sel = $('#coProva');
+  sel.innerHTML = '<option>Carregando...</option>';
+
+  try {
+    // Try loading known provas by scanning codigos_prova
+    // Since we don't have an endpoint for that, we'll fetch items for a range
+    // Simpler: have the backend give us the list via a new small endpoint
+    const r = await fetch('/api/v4/enem/info');
+    const info = await r.json();
+    // We'll fetch all provas by querying /api/v4/enem/itens/{ano}/{area}/{prova}
+    // Actually: we'll use a different approach — fetch ALL codigos via a helper
+
+    // For now, fallback: present a text input
+    sel.innerHTML = '';
+    const PROVAS_BY_YEAR = {
+      2022: { MT: [1055,1056,1057,1058,1059,1060], CH: [1031,1032,1033,1034], CN: [1043,1044,1045,1046], LC: [1067,1068,1069,1070] },
+      2023: { MT: [1273,1274,1275,1276,1277], CH: [1249,1250,1251,1252], CN: [1261,1262,1263,1264], LC: [1285,1286,1287,1288] },
+      2024: { MT: [1407,1408,1409,1410,1411,1412,1414,1415,1416], CH: [1383,1384,1385,1386,1387,1388,1390,1391,1392], CN: [1419,1420,1421,1422,1423,1424,1426,1427,1428], LC: [1395,1396,1397,1398,1399,1400,1402,1403,1404,1405] }
+    };
+    const provas = (PROVAS_BY_YEAR[ano] && PROVAS_BY_YEAR[ano][area]) || [];
+    if (provas.length === 0) {
+      sel.innerHTML = '<option value="">Sem provas conhecidas</option>';
+    } else {
+      provas.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p; opt.textContent = p;
+        sel.appendChild(opt);
+      });
+    }
+  } catch (e) {
+    sel.innerHTML = '<option>Erro</option>';
+  }
+
+  // Toggle language field for LC
+  $('#linguaRow').style.display = (area === 'LC') ? 'flex' : 'none';
+  checkReady();
+}
+
+$('#ano').addEventListener('change', loadProvas);
+$('#area').addEventListener('change', loadProvas);
+
+// ── File input ──
+const zone = $('#dropZone'), input = $('#fileInput'), fname = $('#fname');
+input.addEventListener('change', () => {
+  if (input.files[0]) {
+    fname.textContent = input.files[0].name + ' (' + (input.files[0].size / 1024).toFixed(0) + ' KB)';
+    zone.classList.add('has-file');
+  } else {
+    fname.textContent = '';
+    zone.classList.remove('has-file');
+  }
+  checkReady();
+});
+zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('dragover'); });
+zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+zone.addEventListener('drop', e => {
+  e.preventDefault(); zone.classList.remove('dragover');
+  if (e.dataTransfer.files[0]) { input.files = e.dataTransfer.files; input.dispatchEvent(new Event('change')); }
+});
+
+function checkReady() {
+  const hasFile = input.files[0];
+  const hasYear = $('#ano').value && $('#ano').value !== '';
+  const hasProva = $('#coProva').value && $('#coProva').value !== '';
+  $('#btnProcess').disabled = !(hasFile && hasYear && hasProva);
+}
+
+// ── Process ──
+$('#btnProcess').addEventListener('click', async () => {
+  const fd = new FormData();
+  fd.append('ano', $('#ano').value);
+  fd.append('area', $('#area').value);
+  fd.append('co_prova', $('#coProva').value);
+  fd.append('arquivo', input.files[0]);
+  if ($('#area').value === 'LC') {
+    fd.append('tp_lingua', $('#tpLingua').value);
+  }
+
+  $('#status').classList.add('active');
+  $('#errorBox').classList.remove('active');
+  $('#warningsBox').classList.remove('active');
+  $('#results').classList.remove('active');
+  $('#btnProcess').disabled = true;
+
+  try {
+    const resp = await fetch('/api/v4/enem/validar-simulado', { method: 'POST', body: fd });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || 'Erro no processamento');
+    renderResults(data);
+
+    if (data.avisos && data.avisos.length > 0) {
+      $('#warnCount').textContent = data.avisos.length;
+      $('#warnList').innerHTML = data.avisos.map(w => '<li>' + esc(w) + '</li>').join('');
+      $('#warningsBox').classList.add('active');
+    }
+  } catch (e) {
+    $('#errorBox').textContent = e.message;
+    $('#errorBox').classList.add('active');
+  } finally {
+    $('#status').classList.remove('active');
+    checkReady();
+  }
+});
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// ── Render ──
+function renderResults(data) {
+  const s = data.estatisticas;
+  const t = data.transformacao_inep;
+
+  // Metrics
+  const metricHTML = `
+    <div class="metric highlight">
+      <div class="v">${s.correlacao.toFixed(4)}</div>
+      <div class="l">Correlação V3↔V4</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.mae}</div>
+      <div class="l">MAE (pontos)</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.rmse}</div>
+      <div class="l">RMSE</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.max_diff_abs}</div>
+      <div class="l">Max |diff|</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.pct_concordancia_nivel}%</div>
+      <div class="l">Concordância de Nível</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.n_alunos}</div>
+      <div class="l">Alunos</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.nota_media_v3}</div>
+      <div class="l">Média V3</div>
+    </div>
+    <div class="metric">
+      <div class="v">${s.nota_media_v4}</div>
+      <div class="l">Média V4 (INEP)</div>
+    </div>
+    <div class="metric">
+      <div class="v">${data.n_itens}</div>
+      <div class="l">Itens</div>
+    </div>
+    <div class="metric">
+      <div class="v">${data.tempo_processamento}s</div>
+      <div class="l">Tempo</div>
+    </div>
+  `;
+  $('#metricGrid').innerHTML = metricHTML;
+
+  // Transformation info
+  $('#transfInfo').innerHTML = `
+    <strong>Nota<sub>ENEM</sub> = ${t.sigma.toFixed(4)} × θ + ${t.mu.toFixed(4)}</strong><br>
+    Derivada empiricamente de N=${t.n_alunos.toLocaleString()} alunos reais do ENEM ${t.ano}, área ${t.area}<br>
+    Correlação (validação interna): ${t.correlacao.toFixed(6)} | MAE: ${t.mae}
+  `;
+
+  // Scatter plot
+  drawScatter(data.resultados);
+
+  // Per-student table
+  renderTable(data.resultados);
+
+  $('#results').classList.add('active');
+}
+
+function renderTable(rows) {
+  const html = rows.map(r => {
+    const absDiff = Math.abs(r.diff);
+    const diffClass = absDiff < 10 ? 'diff-low' : absDiff < 30 ? 'diff-med' : 'diff-high';
+    const match = r.estado_v3 === r.estado_v4;
+    return `<tr>
+      <td>${esc(r.aluno_id)}</td>
+      <td>${r.acertos}</td>
+      <td>${r.theta_v3.toFixed(3)}</td>
+      <td>${r.theta_v4.toFixed(3)}</td>
+      <td>${r.nota_v3.toFixed(1)}</td>
+      <td>${r.nota_v4.toFixed(1)}</td>
+      <td class="diff-cell ${diffClass}">${r.diff > 0 ? '+' : ''}${r.diff.toFixed(1)}</td>
+      <td><span class="badge b-${r.estado_v3}">${r.estado_v3}</span></td>
+      <td><span class="badge b-${r.estado_v4}">${r.estado_v4}</span></td>
+      <td class="${match ? 'match' : 'nomatch'}">${match ? '✓' : '✗'}</td>
+    </tr>`;
+  }).join('');
+  $('#tbody').innerHTML = html;
+}
+
+function drawScatter(rows) {
+  const canvas = $('#scatterCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = 900, H = 500;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+
+  const pad = { top: 20, right: 20, bottom: 45, left: 60 };
+  const pw = W - pad.left - pad.right;
+  const ph = H - pad.top - pad.bottom;
+
+  // Axis range — union of V3 and V4
+  let min = Infinity, max = -Infinity;
+  rows.forEach(r => {
+    min = Math.min(min, r.nota_v3, r.nota_v4);
+    max = Math.max(max, r.nota_v3, r.nota_v4);
+  });
+  min = Math.floor(min / 50) * 50;
+  max = Math.ceil(max / 50) * 50;
+
+  const tx = v => pad.left + (v - min) / (max - min) * pw;
+  const ty = v => pad.top + ph - (v - min) / (max - min) * ph;
+
+  // Grid
+  ctx.strokeStyle = '#f0f0f0'; ctx.lineWidth = 0.5;
+  for (let v = min; v <= max; v += 50) {
+    ctx.beginPath(); ctx.moveTo(pad.left, ty(v)); ctx.lineTo(pad.left + pw, ty(v)); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(tx(v), pad.top); ctx.lineTo(tx(v), pad.top + ph); ctx.stroke();
+  }
+
+  // Diagonal (perfect agreement)
+  ctx.strokeStyle = 'rgba(66,133,244,0.5)'; ctx.lineWidth = 1.5; ctx.setLineDash([6, 4]);
+  ctx.beginPath(); ctx.moveTo(tx(min), ty(min)); ctx.lineTo(tx(max), ty(max)); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Dots
+  rows.forEach(r => {
+    ctx.beginPath();
+    ctx.arc(tx(r.nota_v4), ty(r.nota_v3), 4, 0, Math.PI * 2);
+    const absDiff = Math.abs(r.diff);
+    if (absDiff < 10) ctx.fillStyle = 'rgba(39,174,96,0.7)';
+    else if (absDiff < 30) ctx.fillStyle = 'rgba(243,156,18,0.7)';
+    else ctx.fillStyle = 'rgba(231,76,60,0.7)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.12)'; ctx.lineWidth = 0.5; ctx.stroke();
+  });
+
+  // Axes
+  ctx.strokeStyle = '#333'; ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.left, pad.top); ctx.lineTo(pad.left, pad.top + ph);
+  ctx.lineTo(pad.left + pw, pad.top + ph);
+  ctx.stroke();
+
+  ctx.fillStyle = '#444'; ctx.font = '11px -apple-system,sans-serif';
+  ctx.textAlign = 'center';
+  for (let v = min; v <= max; v += 50) ctx.fillText(v, tx(v), pad.top + ph + 15);
+  ctx.font = 'bold 12px -apple-system,sans-serif';
+  ctx.fillText('Nota V4 (INEP oficial)', pad.left + pw / 2, H - 8);
+
+  ctx.textAlign = 'right';
+  ctx.font = '11px -apple-system,sans-serif';
+  for (let v = min; v <= max; v += 50) ctx.fillText(v, pad.left - 6, ty(v) + 4);
+  ctx.save();
+  ctx.translate(15, pad.top + ph / 2);
+  ctx.rotate(-Math.PI / 2);
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 12px -apple-system,sans-serif';
+  ctx.fillText('Nota V3 (calibração local)', 0, 0);
+  ctx.restore();
+}
+</script>
+</body>
+</html>
