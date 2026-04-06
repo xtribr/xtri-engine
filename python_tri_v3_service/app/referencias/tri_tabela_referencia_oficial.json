@@ -1,0 +1,925 @@
+{
+  "CH": {
+    "0": {
+      "tri_min": 329.8,
+      "tri_med": 329.8,
+      "tri_max": 329.8
+    },
+    "1": {
+      "tri_min": 326.2,
+      "tri_med": 338.3,
+      "tri_max": 363.3
+    },
+    "2": {
+      "tri_min": 326.3,
+      "tri_med": 349.0,
+      "tri_max": 389.6
+    },
+    "3": {
+      "tri_min": 326.4,
+      "tri_med": 357.1,
+      "tri_max": 411.1
+    },
+    "4": {
+      "tri_min": 326.7,
+      "tri_med": 367.1,
+      "tri_max": 430.3
+    },
+    "5": {
+      "tri_min": 327.1,
+      "tri_med": 376.7,
+      "tri_max": 446.1
+    },
+    "6": {
+      "tri_min": 327.6,
+      "tri_med": 388.0,
+      "tri_max": 460.3
+    },
+    "7": {
+      "tri_min": 328.1,
+      "tri_med": 399.9,
+      "tri_max": 474.3
+    },
+    "8": {
+      "tri_min": 329.1,
+      "tri_med": 412.8,
+      "tri_max": 488.5
+    },
+    "9": {
+      "tri_min": 330.1,
+      "tri_med": 426.7,
+      "tri_max": 502.3
+    },
+    "10": {
+      "tri_min": 332.9,
+      "tri_med": 441.5,
+      "tri_max": 514.3
+    },
+    "11": {
+      "tri_min": 334.6,
+      "tri_med": 456.9,
+      "tri_max": 526.6
+    },
+    "12": {
+      "tri_min": 337.7,
+      "tri_med": 472.6,
+      "tri_max": 537.6
+    },
+    "13": {
+      "tri_min": 340.5,
+      "tri_med": 488.6,
+      "tri_max": 547.9
+    },
+    "14": {
+      "tri_min": 347.9,
+      "tri_med": 503.1,
+      "tri_max": 560.1
+    },
+    "15": {
+      "tri_min": 354.4,
+      "tri_med": 517.7,
+      "tri_max": 568.1
+    },
+    "16": {
+      "tri_min": 365.8,
+      "tri_med": 531.2,
+      "tri_max": 578.4
+    },
+    "17": {
+      "tri_min": 380.5,
+      "tri_med": 543.3,
+      "tri_max": 586.2
+    },
+    "18": {
+      "tri_min": 393.0,
+      "tri_med": 554.2,
+      "tri_max": 595.5
+    },
+    "19": {
+      "tri_min": 426.9,
+      "tri_med": 565.2,
+      "tri_max": 603.1
+    },
+    "20": {
+      "tri_min": 449.4,
+      "tri_med": 574.6,
+      "tri_max": 611.5
+    },
+    "21": {
+      "tri_min": 480.2,
+      "tri_med": 583.6,
+      "tri_max": 617.6
+    },
+    "22": {
+      "tri_min": 497.6,
+      "tri_med": 592.6,
+      "tri_max": 625.1
+    },
+    "23": {
+      "tri_min": 518.4,
+      "tri_med": 600.6,
+      "tri_max": 632.2
+    },
+    "24": {
+      "tri_min": 539.1,
+      "tri_med": 608.3,
+      "tri_max": 640.6
+    },
+    "25": {
+      "tri_min": 552.7,
+      "tri_med": 616.1,
+      "tri_max": 646.9
+    },
+    "26": {
+      "tri_min": 564.8,
+      "tri_med": 623.8,
+      "tri_max": 654.0
+    },
+    "27": {
+      "tri_min": 576.5,
+      "tri_med": 631.5,
+      "tri_max": 661.1
+    },
+    "28": {
+      "tri_min": 586.3,
+      "tri_med": 639.0,
+      "tri_max": 667.2
+    },
+    "29": {
+      "tri_min": 593.1,
+      "tri_med": 646.7,
+      "tri_max": 675.3
+    },
+    "30": {
+      "tri_min": 603.9,
+      "tri_med": 655.0,
+      "tri_max": 683.5
+    },
+    "31": {
+      "tri_min": 610.1,
+      "tri_med": 662.9,
+      "tri_max": 691.2
+    },
+    "32": {
+      "tri_min": 622.6,
+      "tri_med": 670.9,
+      "tri_max": 699.5
+    },
+    "33": {
+      "tri_min": 629.5,
+      "tri_med": 679.5,
+      "tri_max": 707.8
+    },
+    "34": {
+      "tri_min": 638.0,
+      "tri_med": 688.4,
+      "tri_max": 719.3
+    },
+    "35": {
+      "tri_min": 647.4,
+      "tri_med": 697.8,
+      "tri_max": 726.7
+    },
+    "36": {
+      "tri_min": 656.7,
+      "tri_med": 707.8,
+      "tri_max": 737.9
+    },
+    "37": {
+      "tri_min": 667.6,
+      "tri_med": 718.0,
+      "tri_max": 749.1
+    },
+    "38": {
+      "tri_min": 678.9,
+      "tri_med": 729.4,
+      "tri_max": 760.2
+    },
+    "39": {
+      "tri_min": 689.5,
+      "tri_med": 741.8,
+      "tri_max": 772.4
+    },
+    "40": {
+      "tri_min": 703.7,
+      "tri_med": 755.0,
+      "tri_max": 786.8
+    },
+    "41": {
+      "tri_min": 716.8,
+      "tri_med": 769.6,
+      "tri_max": 800.5
+    },
+    "42": {
+      "tri_min": 738.9,
+      "tri_med": 787.2,
+      "tri_max": 814.1
+    },
+    "43": {
+      "tri_min": 763.0,
+      "tri_med": 806.3,
+      "tri_max": 829.0
+    },
+    "44": {
+      "tri_min": 792.7,
+      "tri_med": 827.2,
+      "tri_max": 842.4
+    },
+    "45": {
+      "tri_min": 852.4,
+      "tri_med": 852.4,
+      "tri_max": 852.4
+    }
+  },
+  "CN": {
+    "0": {
+      "tri_min": 339.9,
+      "tri_med": 339.9,
+      "tri_max": 339.9
+    },
+    "1": {
+      "tri_min": 338.3,
+      "tri_med": 350.8,
+      "tri_max": 375.2
+    },
+    "2": {
+      "tri_min": 338.3,
+      "tri_med": 360.7,
+      "tri_max": 402.7
+    },
+    "3": {
+      "tri_min": 338.3,
+      "tri_med": 371.2,
+      "tri_max": 424.0
+    },
+    "4": {
+      "tri_min": 338.4,
+      "tri_med": 381.7,
+      "tri_max": 444.1
+    },
+    "5": {
+      "tri_min": 338.5,
+      "tri_med": 393.1,
+      "tri_max": 462.7
+    },
+    "6": {
+      "tri_min": 338.8,
+      "tri_med": 404.5,
+      "tri_max": 479.8
+    },
+    "7": {
+      "tri_min": 339.2,
+      "tri_med": 416.2,
+      "tri_max": 500.2
+    },
+    "8": {
+      "tri_min": 339.8,
+      "tri_med": 428.6,
+      "tri_max": 517.5
+    },
+    "9": {
+      "tri_min": 340.6,
+      "tri_med": 441.9,
+      "tri_max": 548.5
+    },
+    "10": {
+      "tri_min": 341.3,
+      "tri_med": 456.3,
+      "tri_max": 547.0
+    },
+    "11": {
+      "tri_min": 343.4,
+      "tri_med": 471.8,
+      "tri_max": 559.1
+    },
+    "12": {
+      "tri_min": 345.2,
+      "tri_med": 488.2,
+      "tri_max": 570.9
+    },
+    "13": {
+      "tri_min": 349.5,
+      "tri_med": 504.8,
+      "tri_max": 582.0
+    },
+    "14": {
+      "tri_min": 351.0,
+      "tri_med": 521.6,
+      "tri_max": 591.8
+    },
+    "15": {
+      "tri_min": 360.6,
+      "tri_med": 538.0,
+      "tri_max": 603.4
+    },
+    "16": {
+      "tri_min": 370.0,
+      "tri_med": 553.7,
+      "tri_max": 614.1
+    },
+    "17": {
+      "tri_min": 380.2,
+      "tri_med": 568.3,
+      "tri_max": 623.1
+    },
+    "18": {
+      "tri_min": 395.5,
+      "tri_med": 582.3,
+      "tri_max": 632.6
+    },
+    "19": {
+      "tri_min": 416.1,
+      "tri_med": 594.7,
+      "tri_max": 640.7
+    },
+    "20": {
+      "tri_min": 449.2,
+      "tri_med": 606.3,
+      "tri_max": 648.1
+    },
+    "21": {
+      "tri_min": 468.6,
+      "tri_med": 616.6,
+      "tri_max": 656.0
+    },
+    "22": {
+      "tri_min": 504.1,
+      "tri_med": 626.7,
+      "tri_max": 664.1
+    },
+    "23": {
+      "tri_min": 534.7,
+      "tri_med": 635.9,
+      "tri_max": 671.2
+    },
+    "24": {
+      "tri_min": 559.3,
+      "tri_med": 645.1,
+      "tri_max": 678.5
+    },
+    "25": {
+      "tri_min": 579.7,
+      "tri_med": 653.8,
+      "tri_max": 687.9
+    },
+    "26": {
+      "tri_min": 595.0,
+      "tri_med": 662.2,
+      "tri_max": 694.8
+    },
+    "27": {
+      "tri_min": 609.3,
+      "tri_med": 670.7,
+      "tri_max": 703.5
+    },
+    "28": {
+      "tri_min": 620.4,
+      "tri_med": 678.8,
+      "tri_max": 711.5
+    },
+    "29": {
+      "tri_min": 634.4,
+      "tri_med": 687.3,
+      "tri_max": 719.3
+    },
+    "30": {
+      "tri_min": 642.9,
+      "tri_med": 695.9,
+      "tri_max": 727.2
+    },
+    "31": {
+      "tri_min": 654.0,
+      "tri_med": 704.1,
+      "tri_max": 735.0
+    },
+    "32": {
+      "tri_min": 663.5,
+      "tri_med": 712.3,
+      "tri_max": 744.2
+    },
+    "33": {
+      "tri_min": 675.7,
+      "tri_med": 721.0,
+      "tri_max": 752.1
+    },
+    "34": {
+      "tri_min": 685.3,
+      "tri_med": 729.8,
+      "tri_max": 762.1
+    },
+    "35": {
+      "tri_min": 694.8,
+      "tri_med": 738.9,
+      "tri_max": 770.1
+    },
+    "36": {
+      "tri_min": 706.6,
+      "tri_med": 748.0,
+      "tri_max": 779.5
+    },
+    "37": {
+      "tri_min": 715.4,
+      "tri_med": 757.9,
+      "tri_max": 791.7
+    },
+    "38": {
+      "tri_min": 726.3,
+      "tri_med": 768.2,
+      "tri_max": 799.4
+    },
+    "39": {
+      "tri_min": 737.1,
+      "tri_med": 779.1,
+      "tri_max": 813.8
+    },
+    "40": {
+      "tri_min": 748.6,
+      "tri_med": 791.0,
+      "tri_max": 822.7
+    },
+    "41": {
+      "tri_min": 764.4,
+      "tri_med": 804.3,
+      "tri_max": 838.7
+    },
+    "42": {
+      "tri_min": 776.5,
+      "tri_med": 819.5,
+      "tri_max": 850.5
+    },
+    "43": {
+      "tri_min": 800.8,
+      "tri_med": 839.7,
+      "tri_max": 861.4
+    },
+    "44": {
+      "tri_min": 833.4,
+      "tri_med": 858.3,
+      "tri_max": 868.9
+    },
+    "45": {
+      "tri_min": 875.9,
+      "tri_med": 875.9,
+      "tri_max": 875.9
+    }
+  },
+  "LC": {
+    "0": {
+      "tri_min": 297.9,
+      "tri_med": 299.6,
+      "tri_max": 303.7
+    },
+    "1": {
+      "tri_min": 296.9,
+      "tri_med": 311.4,
+      "tri_max": 338.1
+    },
+    "2": {
+      "tri_min": 296.9,
+      "tri_med": 322.7,
+      "tri_max": 364.9
+    },
+    "3": {
+      "tri_min": 297.2,
+      "tri_med": 334.0,
+      "tri_max": 385.0
+    },
+    "4": {
+      "tri_min": 297.4,
+      "tri_med": 344.9,
+      "tri_max": 404.8
+    },
+    "5": {
+      "tri_min": 297.8,
+      "tri_med": 356.9,
+      "tri_max": 421.3
+    },
+    "6": {
+      "tri_min": 298.7,
+      "tri_med": 369.2,
+      "tri_max": 437.6
+    },
+    "7": {
+      "tri_min": 299.8,
+      "tri_med": 382.2,
+      "tri_max": 449.9
+    },
+    "8": {
+      "tri_min": 300.7,
+      "tri_med": 395.6,
+      "tri_max": 462.3
+    },
+    "9": {
+      "tri_min": 302.8,
+      "tri_med": 409.4,
+      "tri_max": 475.3
+    },
+    "10": {
+      "tri_min": 304.5,
+      "tri_med": 423.6,
+      "tri_max": 486.6
+    },
+    "11": {
+      "tri_min": 306.3,
+      "tri_med": 438.1,
+      "tri_max": 498.0
+    },
+    "12": {
+      "tri_min": 311.3,
+      "tri_med": 452.1,
+      "tri_max": 509.5
+    },
+    "13": {
+      "tri_min": 317.6,
+      "tri_med": 465.7,
+      "tri_max": 520.6
+    },
+    "14": {
+      "tri_min": 325.6,
+      "tri_med": 479.2,
+      "tri_max": 529.3
+    },
+    "15": {
+      "tri_min": 333.3,
+      "tri_med": 491.3,
+      "tri_max": 552.7
+    },
+    "16": {
+      "tri_min": 347.5,
+      "tri_med": 503.0,
+      "tri_max": 547.9
+    },
+    "17": {
+      "tri_min": 358.4,
+      "tri_med": 513.9,
+      "tri_max": 560.2
+    },
+    "18": {
+      "tri_min": 374.1,
+      "tri_med": 524.1,
+      "tri_max": 564.8
+    },
+    "19": {
+      "tri_min": 400.1,
+      "tri_med": 534.1,
+      "tri_max": 574.0
+    },
+    "20": {
+      "tri_min": 427.2,
+      "tri_med": 543.4,
+      "tri_max": 580.5
+    },
+    "21": {
+      "tri_min": 450.5,
+      "tri_med": 552.0,
+      "tri_max": 588.7
+    },
+    "22": {
+      "tri_min": 471.7,
+      "tri_med": 560.8,
+      "tri_max": 595.6
+    },
+    "23": {
+      "tri_min": 492.1,
+      "tri_med": 569.4,
+      "tri_max": 603.3
+    },
+    "24": {
+      "tri_min": 501.7,
+      "tri_med": 577.2,
+      "tri_max": 612.3
+    },
+    "25": {
+      "tri_min": 514.6,
+      "tri_med": 585.4,
+      "tri_max": 620.4
+    },
+    "26": {
+      "tri_min": 526.4,
+      "tri_med": 593.7,
+      "tri_max": 628.3
+    },
+    "27": {
+      "tri_min": 540.6,
+      "tri_med": 601.8,
+      "tri_max": 636.1
+    },
+    "28": {
+      "tri_min": 550.4,
+      "tri_med": 609.9,
+      "tri_max": 645.7
+    },
+    "29": {
+      "tri_min": 559.8,
+      "tri_med": 618.0,
+      "tri_max": 654.4
+    },
+    "30": {
+      "tri_min": 566.8,
+      "tri_med": 626.5,
+      "tri_max": 660.8
+    },
+    "31": {
+      "tri_min": 578.1,
+      "tri_med": 635.1,
+      "tri_max": 672.2
+    },
+    "32": {
+      "tri_min": 585.7,
+      "tri_med": 643.7,
+      "tri_max": 682.1
+    },
+    "33": {
+      "tri_min": 593.8,
+      "tri_med": 653.0,
+      "tri_max": 690.1
+    },
+    "34": {
+      "tri_min": 606.1,
+      "tri_med": 662.4,
+      "tri_max": 699.9
+    },
+    "35": {
+      "tri_min": 616.4,
+      "tri_med": 672.4,
+      "tri_max": 710.6
+    },
+    "36": {
+      "tri_min": 628.0,
+      "tri_med": 682.8,
+      "tri_max": 722.7
+    },
+    "37": {
+      "tri_min": 640.1,
+      "tri_med": 693.9,
+      "tri_max": 734.9
+    },
+    "38": {
+      "tri_min": 654.1,
+      "tri_med": 706.4,
+      "tri_max": 748.6
+    },
+    "39": {
+      "tri_min": 666.5,
+      "tri_med": 718.8,
+      "tri_max": 760.0
+    },
+    "40": {
+      "tri_min": 684.3,
+      "tri_med": 733.7,
+      "tri_max": 774.6
+    },
+    "41": {
+      "tri_min": 706.1,
+      "tri_med": 748.3,
+      "tri_max": 783.4
+    },
+    "42": {
+      "tri_min": 725.4,
+      "tri_med": 763.6,
+      "tri_max": 790.6
+    },
+    "43": {
+      "tri_min": 753.7,
+      "tri_med": 780.9,
+      "tri_max": 800.0
+    },
+    "44": {
+      "tri_min": 792.5,
+      "tri_med": 804.2,
+      "tri_max": 806.3
+    }
+  },
+  "MT": {
+    "0": {
+      "tri_min": 342.8,
+      "tri_med": 342.8,
+      "tri_max": 342.8
+    },
+    "1": {
+      "tri_min": 341.3,
+      "tri_med": 354.7,
+      "tri_max": 381.3
+    },
+    "2": {
+      "tri_min": 341.4,
+      "tri_med": 364.6,
+      "tri_max": 416.2
+    },
+    "3": {
+      "tri_min": 341.4,
+      "tri_med": 376.2,
+      "tri_max": 445.7
+    },
+    "4": {
+      "tri_min": 341.6,
+      "tri_med": 387.7,
+      "tri_max": 474.6
+    },
+    "5": {
+      "tri_min": 341.9,
+      "tri_med": 400.6,
+      "tri_max": 501.1
+    },
+    "6": {
+      "tri_min": 342.2,
+      "tri_med": 414.0,
+      "tri_max": 525.1
+    },
+    "7": {
+      "tri_min": 342.7,
+      "tri_med": 428.4,
+      "tri_max": 548.1
+    },
+    "8": {
+      "tri_min": 343.1,
+      "tri_med": 444.2,
+      "tri_max": 567.9
+    },
+    "9": {
+      "tri_min": 344.1,
+      "tri_med": 461.3,
+      "tri_max": 588.3
+    },
+    "10": {
+      "tri_min": 345.5,
+      "tri_med": 480.4,
+      "tri_max": 606.6
+    },
+    "11": {
+      "tri_min": 346.9,
+      "tri_med": 500.6,
+      "tri_max": 622.9
+    },
+    "12": {
+      "tri_min": 350.1,
+      "tri_med": 522.8,
+      "tri_max": 655.6
+    },
+    "13": {
+      "tri_min": 352.9,
+      "tri_med": 546.0,
+      "tri_max": 651.8
+    },
+    "14": {
+      "tri_min": 357.6,
+      "tri_med": 569.2,
+      "tri_max": 664.6
+    },
+    "15": {
+      "tri_min": 362.2,
+      "tri_med": 592.6,
+      "tri_max": 677.9
+    },
+    "16": {
+      "tri_min": 370.7,
+      "tri_med": 614.7,
+      "tri_max": 691.0
+    },
+    "17": {
+      "tri_min": 383.2,
+      "tri_med": 635.6,
+      "tri_max": 700.9
+    },
+    "18": {
+      "tri_min": 401.4,
+      "tri_med": 654.3,
+      "tri_max": 713.4
+    },
+    "19": {
+      "tri_min": 415.4,
+      "tri_med": 671.1,
+      "tri_max": 724.2
+    },
+    "20": {
+      "tri_min": 451.3,
+      "tri_med": 686.1,
+      "tri_max": 733.5
+    },
+    "21": {
+      "tri_min": 493.0,
+      "tri_med": 699.3,
+      "tri_max": 744.1
+    },
+    "22": {
+      "tri_min": 546.4,
+      "tri_med": 711.9,
+      "tri_max": 755.2
+    },
+    "23": {
+      "tri_min": 569.2,
+      "tri_med": 723.8,
+      "tri_max": 764.8
+    },
+    "24": {
+      "tri_min": 608.3,
+      "tri_med": 734.8,
+      "tri_max": 775.0
+    },
+    "25": {
+      "tri_min": 644.2,
+      "tri_med": 746.0,
+      "tri_max": 784.2
+    },
+    "26": {
+      "tri_min": 663.2,
+      "tri_med": 756.6,
+      "tri_max": 793.0
+    },
+    "27": {
+      "tri_min": 684.4,
+      "tri_med": 767.4,
+      "tri_max": 804.5
+    },
+    "28": {
+      "tri_min": 702.7,
+      "tri_med": 777.9,
+      "tri_max": 813.7
+    },
+    "29": {
+      "tri_min": 718.6,
+      "tri_med": 788.5,
+      "tri_max": 823.5
+    },
+    "30": {
+      "tri_min": 732.2,
+      "tri_med": 799.2,
+      "tri_max": 833.1
+    },
+    "31": {
+      "tri_min": 745.0,
+      "tri_med": 810.3,
+      "tri_max": 842.8
+    },
+    "32": {
+      "tri_min": 757.2,
+      "tri_med": 821.1,
+      "tri_max": 853.8
+    },
+    "33": {
+      "tri_min": 770.5,
+      "tri_med": 832.3,
+      "tri_max": 865.2
+    },
+    "34": {
+      "tri_min": 784.0,
+      "tri_med": 843.9,
+      "tri_max": 878.2
+    },
+    "35": {
+      "tri_min": 798.2,
+      "tri_med": 856.2,
+      "tri_max": 890.0
+    },
+    "36": {
+      "tri_min": 814.1,
+      "tri_med": 869.1,
+      "tri_max": 902.3
+    },
+    "37": {
+      "tri_min": 823.8,
+      "tri_med": 882.7,
+      "tri_max": 916.5
+    },
+    "38": {
+      "tri_min": 837.9,
+      "tri_med": 896.4,
+      "tri_max": 928.9
+    },
+    "39": {
+      "tri_min": 852.1,
+      "tri_med": 911.7,
+      "tri_max": 942.1
+    },
+    "40": {
+      "tri_min": 874.7,
+      "tri_med": 927.0,
+      "tri_max": 953.9
+    },
+    "41": {
+      "tri_min": 892.4,
+      "tri_med": 942.4,
+      "tri_max": 965.2
+    },
+    "42": {
+      "tri_min": 918.0,
+      "tri_med": 956.2,
+      "tri_max": 973.2
+    },
+    "43": {
+      "tri_min": 943.5,
+      "tri_med": 970.4,
+      "tri_max": 979.4
+    },
+    "44": {
+      "tri_min": 970.7,
+      "tri_med": 980.4,
+      "tri_max": 983.1
+    },
+    "45": {
+      "tri_min": 987.6,
+      "tri_med": 987.6,
+      "tri_max": 987.6
+    }
+  }
+}

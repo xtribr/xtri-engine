@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /app
+
+# Install all dependencies (prod + dev)
+COPY requirements-dev.txt requirements.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Copy application code (tests come via volume mount)
+COPY app/ ./app/
+
+# Default: run full test suite with coverage
+CMD ["pytest", "--cov=app", "--cov-report=term-missing"]
