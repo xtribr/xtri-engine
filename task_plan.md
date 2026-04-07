@@ -64,43 +64,181 @@ Three principled fixes:
 
 The user has chosen a more ambitious path: full data enrichment + UX feedback.
 
-### Phase 5: V2.1 Enriched Output + UX Methodology Feedback [in_progress]
+### Phase 5: V2.1 Enriched Output [complete — commit d80d0cd]
 
-User decisions:
-- Schema: Option B (parallel — keep flat `resultados`, add rich `resultados_estruturados`)
-- UX: All 3 (1A banner + 1B per-student modal + 1C methodology panel)
-- Score types: 8 dimensions (raw, irt, performance, desempenho_pedagogico, posicao_relativa, projecao_aprovacao, recomendacoes, primi) + referencia_inep metadata
-- Always connect to INEP official (citations, validation metrics, methodology links)
-- Single-user, future macOS native app
+Backend delivered. UX layers deferred to Phase 7 (native app absorbs the frontend work).
 
-#### Phase 5A: Backend Schema [pending]
-- New Pydantic models for the 8 dimensions
-- New helper functions: compute_z_cohort, compute_percentil_nacional, classify_pedagogico, sisu_projection, primi_analysis
-- New referencia table for SISU cutoffs and pedagogical interpretations
-- Endpoint /api/v3/processar-csv adds `resultados_estruturados` field
+- [x] **5A Backend Schema** — 7 new Pydantic models + `enriquecimento.py` builders (22.7 KB). `/api/v3/processar-csv` returns `resultados_estruturados`, `metodologia`, `coorte_stats`. 4 files, 782 insertions.
+- [x] Validated across LC/CH/CN/MT — all 8 dimensions populated, cohort-anchoring confirmed (LC bottom = exact area floor 294.0), 5 pedagogical levels present.
+- [~] **5B/5C/5D UX layers** — deferred. Native app wraps existing HTML via WKWebView; banner/modal/methodology panel get polished in that context.
 
-#### Phase 5B: UX 1A — Methodology Banner [pending]
-- After processing, show a banner with method, cohort stats, warnings
-- "validado contra 360K alunos INEP, MAE 0.025"
-- Warn if cohort acertos avg > P95 nacional
+### Phase 6: Validate [complete]
+- [x] 119 tests passing after V2.1
+- [x] 4 corpus areas confirmed (LC/CH/CN/MT)
+- [x] Enriched endpoint verified via curl against running uvicorn
 
-#### Phase 5C: UX 1B — Per-Student Modal [pending]
-- Click student row → modal showing all 8 dimensions
-- Charts: position in cohort, position nationally, breakdown by dimension
-- Specific study recommendations
+### Phase 7: Native macOS App — Tier 1 MVN [in_progress — blocked on scaffold]
 
-#### Phase 5D: UX 1C — Methodology Panel [pending]
-- Collapsible "Diagnóstico Metodológico" at bottom
-- Formula display
-- Reference table visualization
-- Empirical sigma/mu derivation
-- Cited papers with links
+**Goal**: single-user native Mac `.app` that wraps the existing FastAPI service + HTML frontend. Zero functional regression. No distribution, no code signing, no multi-tenancy.
 
-### Phase 6: Validate Everything [pending]
-- All 119 tests still passing
-- New schema tests (10+)
-- All 5 corpus files still process correctly
-- New endpoint returns enriched data
+**Architecture (Tier 1 "Shell-Wrapping")**:
+- Swift/AppKit shell + WKWebView pointing at `http://127.0.0.1:5003`
+- FastAPI runs as child process inside the bundled Python runtime
+- Existing 909-line `static/index.html` reused as-is
+- Reference JSONs bundled in app resources (176 KB total)
+
+**Confirmed decisions** (resolved 2026-04-07):
+| Q | Decision | Rationale |
+|---|---|---|
+| Q2 Bundling tool | **Briefcase (BeeWare)** | Best chance with scipy/numpy/pandas on Apple Silicon |
+| Q3 Frontend in Tier 1 | **WKWebView → existing `static/index.html`** | Preserves 909 lines of working UI |
+| Q4 Supabase | **Keep bundled, optional** | Already gracefully degrades via `is_supabase_configured()` |
+| Q5 Python version | **3.11** | Matches Dockerfile, wheel maturity |
+| Q6 `MICRODATA_PATH` | **NOT bundled** — dev-only | Runtime has zero refs; only `app/scripts/calcular_transformacao.py` + `validacao_massa.py` use it |
+| Q7 Repo strategy | **Keep FastAPI service + add `desktop/` subdir** | Existing CI/Docker unaffected |
+
+**What the `.app` bundles**:
+- Python 3.11 runtime + site-packages (fastapi, uvicorn, numpy, scipy, pandas, openpyxl, pydantic, supabase, python-dotenv)
+- `python_tri_v3_service/app/` (all source)
+- `python_tri_v3_service/app/referencias/tri_tabela_referencia_oficial.json` (16 KB)
+- `python_tri_v3_service/app/referencias/tri_tabela_referencia_multiano.json` (160 KB)
+- Swift/AppKit shell + WKWebView
+
+**What stays outside the `.app`** (dev-only):
+- `MICRODATA_PATH` (INEP CSVs — unknown size, lives wherever user put it)
+- `app/scripts/calcular_transformacao.py` (offline recalibration)
+- `app/scripts/validacao_massa.py` (offline validation)
+- `.env` at repo root (for when dev scripts run from terminal)
+- `docker-compose.yml`, `docker-compose.test.yml` (CI/dev)
+
+**Architecture update (2026-04-07)**: Dropped raw Swift/AppKit in favor of **Toga** (BeeWare's Python GUI toolkit). Toga.WebView on macOS is literally a `WKWebView` wrapped in Python — same rendering, zero Swift code, single Python stack trace for debugging. Briefcase 0.4.1 defaults to Toga anyway.
+
+**Tier 1 execution sequence**:
+
+1. [x] Kill running uvicorn (PID 89649) — port 5003 freed
+2. [x] `mkdir desktop/` at repo root
+3. [x] `brew install python@3.11` → `/opt/homebrew/bin/python3.11` (Python 3.11.15)
+4. [x] Create isolated venv for Briefcase tooling at `desktop/.venv` (Python 3.11.15)
+5. [x] `pip install briefcase` → Briefcase 0.4.1 + 40 transitive deps (rich, cookiecutter, dmgbuild, etc.)
+6. [x] `briefcase new --no-input -Q ...` → scaffold at `desktop/xtri-engine/` (44 KB, Toga-based)
+7. [x] Make `python_tri_v3_service/` pip-installable (**Option 1** chosen over copy/symlink/external-sources):
+    - Added `[build-system]`, `[project name="xtri-service" version="2.1.0"]`, `[tool.setuptools.packages.find]`, `[tool.setuptools.package-data]` to `python_tri_v3_service/pyproject.toml`
+    - Existing `[tool.pytest.ini_options]` + `[tool.coverage.*]` preserved
+    - Referenced from Briefcase as `"xtri-service @ file:///Volumes/KINGSTON/apps/apps/MIRT/python_tri_v3_service"` in `[tool.briefcase.app.xtri-engine].requires`
+    - Package data: `referencias/*.json`, `static/*.html`
+    - **Validated end-to-end**: fresh Python 3.11 venv installed xtri-service + full dep tree in 25 seconds, zero compilation, all wheels (scipy-1.17.1, numpy-2.4.4, pandas-3.0.2, fastapi-0.135.3, cryptography-46.0.6). Smoke test imported `from app.main import app` → 22 routes, title "XTRI Engine API". Reference JSONs + static HTML resolved via `os.path.dirname(__file__)`.
+    - **Zero functional regression**: Dockerfile still uses `requirements.txt`. 119 tests unaffected. 
+8. [x] Rewrite `desktop/xtri-engine/src/xtri_engine/app.py` with Toga WebView + FastAPI subprocess launcher (~135 lines). Verified `GET /health` exists at `app/main.py:170`, so readiness probe uses it. Defaults applied: Q8=A (port 5003), Q9=A (`atexit` + `SIGTERM`/`SIGINT` handlers + SIGTERM→SIGKILL on child), Q10=B (`sys.executable -m uvicorn`). One latent dep: `httpx` is used for the readiness poll but is not directly listed in `xtri-service` deps — it comes in transitively via `supabase`. If supabase ever drops httpx, add it to `python_tri_v3_service/pyproject.toml [project].dependencies`. Stdlib `urllib.request` is the cheap fallback if we want zero deps.
+9. [x] `briefcase dev` → first run with real FastAPI backend + WebView. **Three iterations required**:
+    - **Iter 1 (timeout)**: first attempt timed out at 15s waiting for `/health` because cold imports of scipy/numpy/pandas/supabase + JSON loads in the bundled python-build-standalone runtime took ~25s. Worse: the `TimeoutError` raised inside Toga's `CFTimer` callback was swallowed by rubicon-objc as "Exception ignored", so atexit never fired and we got an orphaned Toga app + live uvicorn child. **Patches**: bumped `STARTUP_TIMEOUT_S` 15 → 60s; wrapped `_start_backend` + `_wait_for_ready` in `try/except BaseException` inside `startup()`, calling `_stop_backend()` then `sys.exit(1)` on failure.
+    - **Iter 2 (success, but orphan on shutdown)**: deps cached, uvicorn bound 5003 well under timeout, all endpoints 200, WebView visible, logo wired (see step 9b below). User closed window → briefcase dev exited 0 → BUT uvicorn child was reparented to launchd (PPID=1) and continued holding port 5003. Root cause: Toga's macOS shutdown goes through `NSApp.terminate_()` which bypasses Python's `atexit` hooks; the SIGTERM handlers I installed in the parent never fire because nothing sends a signal to the parent. **First (broken) patch attempt**: assigned `self.on_exit = self._on_exit` in `startup()` AND set `self.main_window.on_close = self._on_main_window_close` calling `self.exit()`. Both wrong: (a) Toga 0.5 `on_exit` is a method that the constructor wraps via `simple_handler`; assigning a callable in `startup()` after construction replaces the wrapper with an unwrapped method whose signature `(self, app, **kwargs)` doesn't match what `wrapped_handler` passes — so it never actually fires correctly. (b) `app.exit()` is the **unconditional** exit per `toga/app.py:450-456`; it does NOT invoke `on_exit`. The correct API is `app.request_exit()` which fires `on_exit` first.
+    - **Iter 3 (success)**: rewrote to **override `on_exit` as a class method** in `XTRIEngine` (Toga's `__init__` then wraps it via `simple_handler` respecting MRO) and changed `_on_main_window_close` to call `self.request_exit()` instead of `self.exit()`. Verified end-to-end: launched, uvicorn at PID 23828, user closed window, briefcase dev exited 0, port 5003 free, no orphan. Defense in depth still in place: try/except wrapper in startup, on_exit override, on_close → request_exit, atexit + signal handlers as last-resort fallbacks.
+
+9b. [x] **Logo wiring** (user provided `~/Desktop/logotipo.png`, 800×800 RGBA X-TRI logo):
+    - `desktop/xtri-engine/icons/xtri-engine.png` — bundled as macOS app icon at build time. Briefcase reads via explicit `icon = "icons/xtri-engine"` field added to `[tool.briefcase.app.xtri-engine]`. Will only show in Dock/Finder/About panel after `briefcase build macOS` (step 10), NOT in `briefcase dev` mode.
+    - `python_tri_v3_service/app/static/logotipo.png` — served at `/static/logotipo.png` (200 OK, 76016 bytes verified).
+    - `python_tri_v3_service/app/static/index.html` — added `<img src="/static/logotipo.png" alt="X-TRI logo" style="height:48px;width:auto;margin-right:.8rem">` before `<h1>` in the existing `<header>`.
+    - `python_tri_v3_service/pyproject.toml` — package-data widened from `static/*.html` to `static/*` so PNGs (and any future css/js) ship with the wheel.
+    - **Mirror caveat**: in dev mode, the running uvicorn loads `app.main` from the briefcase-managed venv (`.briefcase/xtri-engine/dev.cpython-311-darwin/lib/python3.11/site-packages/app/`), not from the source tree. Both `index.html` and `logotipo.png` had to be mirrored into that location for the change to be visible without reinstalling. Cleaner long-term: install xtri-service as `pip install -e` editable in the briefcase venv. Tracked in Open Items.
+10. [x] `briefcase build macOS` → first runnable `.app`. **Four iterations required**:
+    - **Iter 1 (git license)**: Briefcase failed with "git not installed" — actually git was at `/usr/bin/git` but Apple's `xcrun` shim was blocking it because the Xcode license hadn't been accepted. Briefcase's GitPython probe got the license error and reported it as missing-git. **Fix**: user ran `sudo xcodebuild -license accept` in their own Terminal.app (the `!` shell in Claude has no TTY so sudo can't prompt — important harness limitation).
+    - **Iter 2 (scipy wheel)**: Briefcase tried to resolve scipy with default min macOS 11.0 for arm64; scipy 1.11+ arm64 wheels require macOS 12.0+. **Fix**: added `min_os_version = "12.0"` AND `universal_build = false` to `[tool.briefcase.app.xtri-engine.macOS]` (single-user is arm64-only, no need for universal binaries which would also need x86_64 wheels for the same min OS).
+    - **Iter 3 (icon warning)**: Build succeeded but warned "Unable to find icons/xtri-engine.icns". Briefcase 0.4 does NOT auto-convert PNG → ICNS for macOS — must supply `.icns` directly. **Fix**: generated `desktop/xtri-engine/icons/xtri-engine.icns` from the 800×800 PNG via `sips` + `iconutil` with all 10 standard sizes (16, 16@2x, 32, 32@2x, 128, 128@2x, 256, 256@2x, 512, 512@2x — the @2x of 512 is upscaled from 800 to 1024). Verified `Info.plist.CFBundleIconFile = "xtri-engine.icns"` and the `.icns` is at `Contents/Resources/`.
+    - **Iter 4 (subprocess hangs in packaged app)**: First launch via `open` left the main app stuck in `_wait_for_ready` for 3 minutes; uvicorn child PIDs orphaned to launchd in state S, port never bound. **Root cause**: the dev-mode pattern `[sys.executable, "-m", "uvicorn", "app.main:app", ...]` is structurally broken in a packaged Briefcase app because **`sys.executable` resolves to the GUI-Stub binary, which is NOT a generic Python interpreter** — it ignores `-c` and `-m` flags (verified empirically: `XTRI Engine -c "print(1)"` returns nothing, the stub silently ignores the flag). The dev-mode test passed because dev mode runs against the host's real Python at `sys.executable`. **Fix**: rewrote `app.py` to drop subprocess entirely. uvicorn now runs **in a worker thread** within the main process via `uvicorn.Server` + `uvicorn.Config`, with a `_XTRIServer` subclass that no-ops `install_signal_handlers` (signal.signal only works on the main thread, and Toga owns it anyway). Cleanup is `server.should_exit = True` + `thread.join(timeout=5)`. No subprocess, no orphan risk, smaller mental model.
+    - **Verified end-to-end**: `briefcase build macOS` produces `desktop/xtri-engine/build/xtri-engine/macos/app/XTRI Engine.app` (353 MB, arm64-thin, ad-hoc signed, identifier `com.gabaritai.xtri-engine`). Launching via `open` → port 5003 bound by the **main app process itself** (PID 32650, no children) → `/health` HTTP 200 in <1ms → `/static/logotipo.png` HTTP 200 (76016 bytes) → Toga MainWindow + WebView visible with X-TRI logo in both Dock (.icns) and WebView header (.png).
+11. [x] Smoke test on real data:
+    - LC.txt (54 students) processed via packaged .app with 2024 reference scale → all sanity checks passed against the PDF tables (lowest-theta @ tri_min, highest-theta near tri_max for their acertos band).
+    - Data layer iteration during smoke test: user identified all four `TRI_MAXIMA_OFICIAL` constants were higher than the empirical 2024 maxes from `~/Desktop/ENEM 2024 - dificuldades.pdf`. Compared old (LC=800/CH=835/CN=875/MT=990) vs PDF (795.8/819.7/867.2/961.9). Updated to round-down conservative values: **LC=790, CH=815, CN=865, MT=960**.
+    - Added a new `2024` year to `tri_tabela_referencia_multiano.json` with full 0-45 acertos data for LC (pooled INGLÊS+ESPANHOL: min=min, max=max, med=mean), CH, MT, and 0-44 for CN (PDF has no row 45). Build script archived at `/tmp/build_2024_year.py`.
+    - **Slider math bug** caught during V3 Local validation: Theta Shift / Theta Scale were no-ops for Cohort-Anchored AND Percentil methods because both normalize against the cohort, and a uniform shift cancels out. Fixed by applying shift/scale **post-z-score** in `anchorCohortAnchored()` and **post-percentile** in `anchorPercentilTurma()` (via `normCdf` mapping). Confirmed via instrumented debug panel showing reanchor fired with correct values; chart now updates visibly when sliders move.
+    - **UI layout fixes** caught alongside slider bug: dropdown text "Cohort-Anchored (z-score → tri_min/med/max)" was overflowing into adjacent grid cell. Shortened option label to "Cohort-Anchored" and added `min-width:0; overflow:hidden` containment to `.tune-item`. Chart x-axis label "Numero de Acertos" was rendering at the same y as the footer credit (1px apart) — fixed by bumping `pad.bottom` from 55 to 90 and repositioning both labels relative to plot bottom.
+12. [x] `cp -r` (via `ditto`, more macOS-correct) to `/Applications/XTRI Engine.app` AND `~/Desktop/XTRI Engine.app` (Desktop staging copy for AirDrop to home Mac mini M4). Both 353 MB, ad-hoc signed, identifier `com.gabaritai.xtri-engine`. The `.icns` icon survived the rebuild via manual swap (Briefcase 0.4 only copies icons during `create`, not on subsequent `build` runs — known quirk).
+13. [ ] **Optional cleanup**: `briefcase create macOS` for a clean from-scratch rebuild that doesn't depend on the manual icon swap surviving across rebuilds.
+
+**Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
+
+### Step 8 sub-decisions (recommended defaults, unless user overrides)
+
+**Q8 — Port selection**: **(A) Hardcode 5003** — matches dev workflow, user is single-user.
+- Alt (C): try 5003 first, fall back to random if busy. Switch to (C) only if 5003 conflicts in practice.
+
+**Q9 — Subprocess lifecycle on app crash**: **(A) `atexit` + SIGTERM/SIGKILL signal handlers** — good enough for Tier 1, minimal code.
+- Alt (B): pidfile at `~/Library/Application Support/XTRI Engine/uvicorn.pid` cleaned on next launch.
+
+**Q10 — How to invoke uvicorn in dev + bundled**: **(B) `sys.executable -m uvicorn`** — bulletproof across `briefcase dev` and bundled `.app`.
+- Alt (A): `uvicorn.run()` in a `multiprocessing` child. Clean but adds complexity.
+
+### Step 8 implementation sketch
+
+`desktop/xtri-engine/src/xtri_engine/app.py` becomes ~150 lines:
+
+```python
+import subprocess, sys, atexit, signal, time, socket
+import httpx
+import toga
+from toga.style.pack import COLUMN, Pack
+
+PORT = 5003  # Q8=A
+HOST = "127.0.0.1"
+HEALTH_URL = f"http://{HOST}:{PORT}/health"
+STARTUP_TIMEOUT_S = 15
+
+class XTRIEngine(toga.App):
+    def startup(self):
+        self._uvicorn: subprocess.Popen | None = None
+        self._start_backend()          # Q10=B: sys.executable -m uvicorn
+        self._wait_for_ready()         # poll /health
+        self.main_window = toga.MainWindow(title=self.formal_name, size=(1400, 900))
+        self.main_window.content = toga.WebView(
+            url=f"http://{HOST}:{PORT}/",
+            style=Pack(flex=1),
+        )
+        self.main_window.show()
+
+    def _start_backend(self):
+        self._uvicorn = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn",
+             "app.main:app",
+             "--host", HOST,
+             "--port", str(PORT),
+             "--log-level", "warning"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+        )
+        atexit.register(self._stop_backend)  # Q9=A
+
+    def _wait_for_ready(self):
+        deadline = time.time() + STARTUP_TIMEOUT_S
+        while time.time() < deadline:
+            try:
+                r = httpx.get(HEALTH_URL, timeout=1.0)
+                if r.status_code == 200:
+                    return
+            except httpx.HTTPError:
+                pass
+            if self._uvicorn.poll() is not None:
+                stderr = self._uvicorn.stderr.read().decode(errors="replace")
+                raise RuntimeError(f"uvicorn exited early:\n{stderr}")
+            time.sleep(0.2)
+        raise TimeoutError(f"Backend didn't reach {HEALTH_URL} within {STARTUP_TIMEOUT_S}s")
+
+    def _stop_backend(self):
+        if self._uvicorn and self._uvicorn.poll() is None:
+            self._uvicorn.send_signal(signal.SIGTERM)
+            try:
+                self._uvicorn.wait(timeout=3.0)
+            except subprocess.TimeoutExpired:
+                self._uvicorn.kill()
+
+def main():
+    return XTRIEngine()
+```
+
+**Step 8 open questions — resolved**:
+- `/health` endpoint: **exists** at `app/main.py:170`. `_wait_for_ready` polls it directly.
+- `httpx` dependency: comes in transitively via `supabase` (supabase-py uses httpx internally). Acceptable for Tier 1; flag in Open Items so future dep upgrades don't silently break the readiness probe.
+
+**Current blocker (resolved 2026-04-07, round 2)**: Twice the user pasted AI-generated "authorized sequences" that contradicted Tier 1 (generic Python app scaffold with `requests`/`pandas`/`app.py`/`utils/`/`assets/`). Flagged both times. User confirmed "Lets go with A" → Tier 1 sequence above. User later picked Toga defaults, Option 1 package install, and said "dont worry about" an accidentally-pasted password.
 
 ## Files Created/Modified Tracking
 

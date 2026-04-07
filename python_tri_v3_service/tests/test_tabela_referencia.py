@@ -103,7 +103,7 @@ class TestTabelaReferenciaMultiano:
     @pytest.mark.unit
     def test_anos_esperados(self, multiano):
         anos = set(multiano.keys())
-        assert {2009, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022} == anos
+        assert {2009, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2024} == anos
 
     @pytest.mark.unit
     def test_cada_ano_tem_quatro_areas(self, multiano):

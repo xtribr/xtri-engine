@@ -43,10 +43,11 @@ select{padding:.45rem .8rem;border:1px solid #ddd;border-radius:4px;font-size:.9
 .scard .v{font-size:1.3rem;font-weight:700;color:#2c3e50}.scard .l{font-size:.72rem;color:#888;text-transform:uppercase}
 /* Tuning panel */
 .tuning{display:none}.tuning.active{display:block}
-.tune-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:.8rem}
-.tune-item{display:flex;align-items:center;gap:.6rem;font-size:.85rem}
-.tune-item label{min-width:90px;font-weight:600;font-size:.82rem}
-.tune-item input[type=range]{flex:1;min-width:100px}
+.tune-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:.8rem .8rem}
+.tune-item{display:flex;align-items:center;gap:.6rem;font-size:.85rem;min-width:0;overflow:hidden}
+.tune-item label{min-width:90px;font-weight:600;font-size:.82rem;white-space:nowrap}
+.tune-item select{min-width:0;max-width:100%;flex:1}
+.tune-item input[type=range]{flex:1;min-width:80px}
 .tune-val{min-width:38px;text-align:right;font-weight:600;font-family:monospace;font-size:.85rem}
 .tune-note{font-size:.7rem;color:#888}
 /* Table */
@@ -77,6 +78,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
 </head>
 <body>
 <header style="background:linear-gradient(135deg,#2c3e50 0%,#1e3c72 100%)">
+  <img src="/static/logotipo.png" alt="X-TRI logo" style="height:48px;width:auto;margin-right:.8rem">
   <h1>XTRI Engine</h1>
   <span>Calculadora TRI 3PL - Simulados ENEM</span>
   <nav style="margin-left:auto;font-size:.85rem">
@@ -148,7 +150,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       <div class="tune-item">
         <label>Metodo:</label>
         <select id="anchorMethod" title="Metodo de ancoragem para converter theta em nota ENEM">
-          <option value="mediana_ancorada" selected>Cohort-Anchored (z-score → tri_min/med/max)</option>
+          <option value="mediana_ancorada" selected>Cohort-Anchored</option>
           <option value="percentil_turma">Percentil na Turma</option>
           <option value="mediana_acertos">Mediana por Acertos</option>
           <option value="cdf_theta">CDF do Theta (legacy)</option>
@@ -268,12 +270,23 @@ function getRef(acertos){
 
 // ── Anchoring methods ──
 // Cohort-Anchored Distribution: z-score normalization within cohort +
-// percentile mapping into [tri_min, tri_med, tri_max] of the official table
-function anchorCohortAnchored(theta, acertos, cohortMean, cohortStd){
+// percentile mapping into [tri_min, tri_med, tri_max] of the official table.
+//
+// IMPORTANT: shift and scale are applied to the z-score AFTER cohort
+// normalization, NOT to the input theta. Pre-shifting thetas is a no-op
+// because the cohort mean shifts by the same amount, cancelling out.
+// Post-shifting z lets the user actually move their cohort relative to
+// the reference distribution:
+//   shift > 0 → every student's percentile moves up → notas higher
+//   scale > 1 → z magnitudes increase → top spreads further from bottom
+function anchorCohortAnchored(theta, acertos, cohortMean, cohortStd, shift, scale){
   const r=getRef(acertos); if(!r)return 0;
   if(r.tri_min===r.tri_max)return r.tri_med;
   const std=cohortStd<1e-6?1.0:cohortStd;
-  const z=(theta-cohortMean)/std;
+  const zRaw=(theta-cohortMean)/std;
+  // Apply shift/scale POST-COHORT (defaults: shift=0, scale=1 → identity)
+  const s=(scale==null?1:scale), sh=(shift==null?0:shift);
+  const z=zRaw*s+sh;
   const pct=normCdf(z);
   if(pct<=0.5){
     const localPct=pct/0.5;
@@ -288,9 +301,17 @@ function anchorCdfTheta(theta,acertos){
   return r.tri_min+normCdf(theta)*(r.tri_max-r.tri_min);
 }
 function anchorMedianaAcertos(theta,acertos){const r=getRef(acertos);return r?r.tri_med:0}
-function anchorPercentilTurma(theta,acertos,rank,total){
+function anchorPercentilTurma(theta,acertos,rank,total,shift,scale){
   const r=getRef(acertos);if(!r)return 0;
-  const pct=rank/Math.max(total-1,1);
+  if(r.tri_min===r.tri_max)return r.tri_med;
+  let pct=rank/Math.max(total-1,1);  // 0..1 from rank
+  // Apply scale: stretch around 0.5 (center of range)
+  const s=(scale==null?1:scale), sh=(shift==null?0:shift);
+  pct=0.5+(pct-0.5)*s;
+  // Apply shift via z→percentile mapping (shift in z-units → percentile offset)
+  pct+=normCdf(sh)-0.5;
+  // Clamp to [0,1]
+  pct=Math.max(0,Math.min(1,pct));
   return r.tri_min+pct*(r.tri_max-r.tri_min);
 }
 
@@ -527,26 +548,30 @@ function reanchor(){
   const shift=parseFloat($('#sliderShift').value), scale=parseFloat($('#sliderScale').value);
   const method=$('#anchorMethod').value;
   const al=currentAl;
-  // Compute adjusted thetas
+  // Adjusted thetas (used by non-cohort methods: cdf_theta, mediana_acertos, percentil_turma).
+  // For these, pre-shifting/scaling thetas IS meaningful because they don't normalize against the cohort.
   const adjusted=rawThetas.map(r=>({...r,thetaAdj:(r.theta+shift)*scale}));
 
-  // Cohort statistics (used by mediana_ancorada — Cohort-Anchored Distribution)
-  const adjThetas=adjusted.map(r=>r.thetaAdj);
-  const cohortMean=adjThetas.reduce((s,v)=>s+v,0)/adjThetas.length;
-  const cohortVar=adjThetas.reduce((s,v)=>s+(v-cohortMean)*(v-cohortMean),0)/adjThetas.length;
-  const cohortStd=Math.sqrt(cohortVar);
+  // REAL cohort statistics (from unshifted thetas) — used by Cohort-Anchored only.
+  // Pre-applying shift/scale here would cancel out (mean and std move proportionally),
+  // so we keep the cohort stats unchanged and apply shift/scale POST-z-score inside
+  // anchorCohortAnchored().
+  const realThetas=rawThetas.map(r=>r.theta);
+  const realCohortMean=realThetas.reduce((s,v)=>s+v,0)/realThetas.length;
+  const realCohortVar=realThetas.reduce((s,v)=>s+(v-realCohortMean)*(v-realCohortMean),0)/realThetas.length;
+  const realCohortStd=Math.sqrt(realCohortVar);
 
-  // For percentil method, sort by theta and assign global ranks
+  // For percentil method, sort by adjusted theta and assign global ranks
   if(method==='percentil_turma'){adjusted.sort((a,b)=>a.thetaAdj-b.thetaAdj);adjusted.forEach((r,i)=>{r.rank=i})}
   // Compute notas
   let dentro=0;
   adjusted.forEach(r=>{
     let nota;
-    if(method==='mediana_ancorada')nota=anchorCohortAnchored(r.thetaAdj,r.acertos,cohortMean,cohortStd);
+    if(method==='mediana_ancorada')nota=anchorCohortAnchored(r.theta,r.acertos,realCohortMean,realCohortStd,shift,scale);
     else if(method==='cdf_theta')nota=anchorCdfTheta(r.thetaAdj,r.acertos);
     else if(method==='mediana_acertos')nota=anchorMedianaAcertos(r.thetaAdj,r.acertos);
-    else if(method==='percentil_turma')nota=anchorPercentilTurma(r.thetaAdj,r.acertos,r.rank,adjusted.length);
-    else nota=anchorCohortAnchored(r.thetaAdj,r.acertos,cohortMean,cohortStd);
+    else if(method==='percentil_turma')nota=anchorPercentilTurma(r.theta,r.acertos,r.rank,adjusted.length,shift,scale);
+    else nota=anchorCohortAnchored(r.theta,r.acertos,realCohortMean,realCohortStd,shift,scale);
     nota=Math.round(nota*10)/10;
     r.nota=nota;r.estado=estadoTri(nota);
     const ref2=getRef(r.acertos);
@@ -593,9 +618,13 @@ function reanchor(){
 // ── Slider events ──
 function updateSliderState(){
   const m=$('#anchorMethod').value;
-  // Shift/Scale only affect methods that use absolute theta values
-  // Mediana_acertos ignores theta entirely; Cohort-Anchored now uses theta absolute,
-  // so shift/scale ARE meaningful (they shift the cohort distribution and re-anchor)
+  // Shift/Scale are applied differently per method:
+  //   - Cohort-Anchored: applied POST z-score (zRaw*scale + shift) — see anchorCohortAnchored
+  //   - Percentil na Turma: applied to the percentile via normCdf shift + spread — see anchorPercentilTurma
+  //   - CDF do Theta: applied to raw theta (legacy method, theta is the input)
+  //   - Mediana por Acertos: ignores theta entirely → sliders disabled
+  // Pre-applying shift/scale to cohort/percentil thetas would cancel out (uniform
+  // transformations don't change ranks or cohort z-scores).
   const disabled=(m==='mediana_acertos');
   $('#sliderShift').disabled=disabled;
   $('#sliderScale').disabled=disabled;
@@ -604,7 +633,9 @@ function updateSliderState(){
 }
 ['sliderShift','sliderScale'].forEach(id=>{
   const el=$('#'+id),val=$('#val'+id.replace('slider',''));
-  el.addEventListener('input',()=>{val.textContent=parseFloat(el.value).toFixed(1);reanchor()});
+  const handler=()=>{val.textContent=parseFloat(el.value).toFixed(1);reanchor()};
+  el.addEventListener('input',handler);
+  el.addEventListener('change',handler);  // defense-in-depth: some WebKit configs only fire 'change'
 });
 $('#anchorMethod').addEventListener('change',()=>{updateSliderState();reanchor()});
 $('#sliderC').addEventListener('input',()=>{$('#valC').textContent=parseFloat($('#sliderC').value).toFixed(2)});
@@ -665,8 +696,9 @@ function drawAnchorChart(students){
   const W=960,H=540;canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';
   const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
   const ref=resultData.referencia;
-  // Extra right padding for the color bar legend
-  const pad={top:50,right:90,bottom:55,left:65};const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
+  // Extra right padding for color bar legend; bottom needs room for tick labels,
+  // axis title, AND footer credit (3 stacked text lines below the plot)
+  const pad={top:50,right:90,bottom:90,left:65};const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
   const maxAc=ref[ref.length-1].acertos;
   let yMin=Infinity,yMax=-Infinity;
   ref.forEach(p=>{if(p.tri_min<yMin)yMin=p.tri_min;if(p.tri_max>yMax)yMax=p.tri_max});
@@ -703,7 +735,8 @@ function drawAnchorChart(students){
   ctx.fillStyle='#444';ctx.font='11px -apple-system,sans-serif';ctx.textAlign='center';
   for(let x=0;x<=maxAc;x+=5)ctx.fillText(x,txF(x),pad.top+ph+16);
   ctx.font='bold 12px -apple-system,sans-serif';ctx.fillStyle='#333';
-  ctx.fillText('Numero de Acertos',pad.left+pw/2,H-8);
+  // Axis label sits 38px below plot bottom (well above the footer)
+  ctx.fillText('Numero de Acertos',pad.left+pw/2,pad.top+ph+38);
   // Y labels
   ctx.textAlign='right';ctx.font='11px -apple-system,sans-serif';ctx.fillStyle='#444';
   for(let y=yMin;y<=yMax;y+=50)ctx.fillText(y,pad.left-8,tyF(y)+4);
@@ -736,9 +769,9 @@ function drawAnchorChart(students){
     ctx.strokeStyle='#aaa';ctx.beginPath();ctx.moveTo(barX+barW,yy);ctx.lineTo(barX+barW+2,yy);ctx.stroke();
   });
 
-  // Footer
+  // Footer credit — sits 22px below the axis label, well clear of overlap
   ctx.textAlign='center';ctx.font='10px -apple-system,sans-serif';ctx.fillStyle='#bbb';
-  ctx.fillText('Estudo realizado pela XTRI Engine | Prof. Alexandre Emerson Melo de Araujo',pad.left+pw/2,H-pad.bottom+46);
+  ctx.fillText('Estudo realizado pela XTRI Engine | Prof. Alexandre Emerson Melo de Araujo',pad.left+pw/2,pad.top+ph+60);
 
   // Remove bottom HTML legend (the canvas legend replaces it)
   $('#chartLegend').innerHTML='';

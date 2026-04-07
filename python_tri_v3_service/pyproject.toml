@@ -1,3 +1,37 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xtri-service"
+version = "2.1.0"
+description = "XTRI Engine API — IRT scoring for ENEM simulations"
+requires-python = ">=3.11"
+authors = [{name = "Alexandre Emerson"}]
+license = {text = "Proprietary"}
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "pydantic>=2.0.0",
+    "numpy>=1.24.0",
+    "scipy>=1.11.0",
+    "pandas>=2.0.0",
+    "python-multipart>=0.0.9",
+    "openpyxl>=3.1.0",
+    "supabase>=2.4.0",
+    "python-dotenv>=1.0.0",
+]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+app = [
+    "referencias/*.json",
+    "static/*",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

@@ -9,23 +9,25 @@ import json
 import os
 from typing import Dict, Optional
 
-# Limites máximos EMPIRICOS observados nos microdados ENEM 2022/2023/2024
-# (max real + ~5 pts buffer para variabilidade de amostragem entre anos)
+# Limites máximos EMPIRICOS observados nos microdados ENEM 2024
+# (fonte: ENEM 2024 - dificuldades.pdf, tabela oficial INEP por acertos)
 #
-# Valores reais máximos observados (100K-200K alunos por ano):
-#   LC: 2022=764.6  2023=758.6  2024=795.8  → max global 795.8 → teto 800
-#   CH: 2022=829.1  2023=823.0  2024=819.7  → max global 829.1 → teto 835
-#   CN: 2022=868.7  2023=868.4  2024=867.2  → max global 868.7 → teto 875
-#   MT: 2022=983.9  2023=958.6  2024=961.9  → max global 983.9 → teto 990
+# Valores reais máximos observados em 2024 (no acerto máximo de cada área):
+#   LC INGLÊS: 45 acertos → 795.8 (18 alunos no topo)
+#   LC ESPANHOL: 45 acertos → 795.8 (2 alunos no topo)
+#   CH:        45 acertos → 819.7 (111 alunos no topo)
+#   CN:        44 acertos → 867.2 (17 alunos no topo, sem dado para 45)
+#   MT:        45 acertos → 961.9 (506 alunos no topo)
 #
-# Importante: valores anteriores eram superestimados (LC 835 vs real 795).
-# 99% dos alunos LC ficam abaixo de 670. O P99.99 (top 0.01%) é ~745.
-# Apenas 1 em cada 10000 alunos chega perto do teto.
+# Tetos abaixo são round-down conservadores em relação ao máximo empírico,
+# para evitar inflação a partir de calibrações locais. Valores anteriores
+# (LC=800, CH=835, CN=875, MT=990) tinham buffer excessivo acima do real.
+# Atualizado em 2026-04-07 contra o PDF oficial 2024.
 TRI_MAXIMA_OFICIAL = {
-    'LC': 800.0,
-    'CH': 835.0,
-    'CN': 875.0,
-    'MT': 990.0,
+    'LC': 790.0,   # 2024 real: 795.8 — round-down para 790
+    'CH': 815.0,   # 2024 real: 819.7 — round-down para 815
+    'CN': 865.0,   # 2024 real: 867.2 — round-down para 865
+    'MT': 960.0,   # 2024 real: 961.9 — round-down para 960
 }
 
 # Percentis 99.9 reais (top 0.1% dos alunos) — útil para sanity check

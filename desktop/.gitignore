@@ -1,0 +1,13 @@
+# Briefcase tooling venv (recreated by `python -m venv .venv && pip install briefcase`)
+.venv/
+
+# Briefcase-managed environments and build artifacts
+xtri-engine/.briefcase/
+xtri-engine/build/
+xtri-engine/dist/
+xtri-engine/logs/
+
+# Python bytecode
+**/__pycache__/
+*.pyc
+*.pyo
