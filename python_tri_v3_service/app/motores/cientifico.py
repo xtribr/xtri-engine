@@ -133,27 +133,77 @@ def eap_theta(
 # ANCORAGEM NA TABELA DE REFERÊNCIA
 # ════════════════════════════════════════════════════════════════════════════════
 
+def _smoothing_band(
+    group_size: int,
+    ref_min: float,
+    ref_med: float,
+    ref_max: float,
+) -> tuple:
+    """
+    Returns (band_min, band_max) for the rank-based distribution within an
+    acertos group, smoothed by group size to avoid artificial spread when
+    only 2-5 students share the same acertos count.
+
+    Sizing rationale:
+      - Single student → tri_med (no rank possible, best point estimate)
+      - 2 students  → ±20% of half-band, centered at tri_med (very tight)
+      - 3-5 students → ±40% of half-band (mild spread)
+      - 6-10 students → ±70% of half-band (moderate spread)
+      - 11+ students → full [tri_min, tri_max] (current behavior, statistically reliable)
+
+    The half-band reference is the larger of (tri_max - tri_med) and
+    (tri_med - tri_min), so the band can be asymmetric around the median
+    without exceeding the official reference bounds.
+    """
+    if group_size <= 1:
+        return ref_med, ref_med
+
+    if ref_min == ref_max:
+        return ref_min, ref_max
+
+    if group_size >= 11:
+        return ref_min, ref_max
+
+    if group_size == 2:
+        band_pct = 0.20
+    elif group_size <= 5:
+        band_pct = 0.40
+    else:  # 6 to 10
+        band_pct = 0.70
+
+    half_max = max(ref_max - ref_med, ref_med - ref_min)
+    half_width = half_max * band_pct
+    band_min = max(ref_min, ref_med - half_width)
+    band_max = min(ref_max, ref_med + half_width)
+    return band_min, band_max
+
+
 def ancorar_notas(
     thetas: List[Dict[str, Any]],
     tabela: TabelaReferenciaTRI,
     area: str
 ) -> List[Dict[str, Any]]:
     """
-    Mapeia θ → nota usando rank intragrupo dentro de cada faixa de acertos.
+    Mapeia θ → nota usando rank intragrupo dentro de cada faixa de acertos,
+    com suavização adaptativa baseada no tamanho do grupo.
 
-    Lógica (intra-group rank — Primi-aligned):
+    Lógica (intra-group rank com smoothing — Primi-aligned):
       - Agrupa alunos pelo número de acertos K
       - Dentro de cada grupo K, ordena por θ (maior θ = melhor padrão de resposta)
-      - O rank dentro do grupo determina a posição no intervalo [tri_min_K, tri_max_K]
-      - Grupo com 1 aluno → tri_med (melhor estimativa pontual)
+      - O rank dentro do grupo determina a posição em uma BANDA SUAVIZADA
+        centrada na mediana da tabela oficial (tri_med)
+      - Grupos pequenos (2-5 alunos) → banda apertada para evitar spread artificial
+      - Grupos grandes (≥11 alunos) → banda completa [tri_min, tri_max]
+      - Grupo com 1 aluno → tri_med (best point estimate)
       - Garante 100% dentro do intervalo oficial
       - θ do simulado é usado apenas para ORDENAÇÃO RELATIVA, não como valor absoluto
 
-    Por que este método:
-      O θ calibrado localmente (simulado) NÃO está na escala ENEM.
-      A tabela de referência (tri_min/med/max por acertos) incorpora a distribuição
-      real de 5+ milhões de participantes do ENEM. O rank intragrupo posiciona
-      cada aluno dentro dessa distribuição real.
+    Por que suavização adaptativa:
+      Sem suavização, 2 alunos com mesmos acertos e θ similares podiam receber
+      notas em níveis pedagógicos completamente diferentes (ex: ELEMENTAR vs BASICO)
+      apenas porque o rank-based distribution espalhava do tri_min ao tri_max.
+      A suavização faz a banda crescer progressivamente conforme há mais
+      alunos no grupo, garantindo discriminação estatística confiável.
 
     Args:
         thetas: Lista de dicts com 'aluno_id', 'acertos', 'theta', 'se', ...
@@ -163,7 +213,6 @@ def ancorar_notas(
     Returns:
         Lista de dicts com 'nota_ancorada' adicionado
     """
-    # Group by acertos count
     from collections import defaultdict
     groups: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
     for t in thetas:
@@ -178,25 +227,24 @@ def ancorar_notas(
         ref_max = ref['tri_max']
 
         if len(group) == 1:
-            # Single student: use median (best point estimate)
             nota = ref_med
             resultado = {**group[0], 'nota_ancorada': round(float(nota), 1)}
             resultados.append(resultado)
             continue
 
-        # Sort by theta within the group (higher theta = better response pattern)
         group.sort(key=lambda t: t['theta'])
         n = len(group)
 
+        band_min, band_max = _smoothing_band(n, ref_min, ref_med, ref_max)
+
         for i, t in enumerate(group):
-            pct = i / (n - 1)  # 0.0 to 1.0
+            pct = i / (n - 1)
 
-            if ref_min == ref_max:
-                nota = ref_med
+            if band_min == band_max:
+                nota = band_min
             else:
-                nota = ref_min + pct * (ref_max - ref_min)
+                nota = band_min + pct * (band_max - band_min)
 
-            # Teto absoluto por área
             tri_maxima = TRI_MAXIMA_OFICIAL.get(area, 1000.0)
             nota = min(nota, tri_maxima)
 

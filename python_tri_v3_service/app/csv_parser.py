@@ -28,10 +28,15 @@ _QUESTAO_RE = re.compile(r"quest[ãa]o\s+(\d+)", re.IGNORECASE)
 
 
 def _detect_delimiter(sample: str) -> str:
-    """Detect CSV delimiter from the first few lines."""
+    """Detect delimiter from the first few lines: tab, semicolon, or comma."""
+    tabs = sample.count("\t")
     semicolons = sample.count(";")
     commas = sample.count(",")
-    return ";" if semicolons > commas else ","
+    if tabs > semicolons and tabs > commas:
+        return "\t"
+    if semicolons > commas:
+        return ";"
+    return ","
 
 
 def _is_question_column(header: str) -> bool:
@@ -77,6 +82,14 @@ def parse_single_area(content: str, is_xlsx: bool = False) -> dict[str, Any]:
     return _parse_csv_text(content)
 
 
+def _is_binary_row(row: list[str]) -> bool:
+    """Check if a row is composed entirely of 0/1 values (no header)."""
+    non_empty = [c.strip() for c in row if c.strip()]
+    if len(non_empty) < 30:
+        return False
+    return all(c in ("0", "1") for c in non_empty)
+
+
 def _parse_csv_text(csv_content: str) -> dict[str, Any]:
     """Parse CSV text content."""
     avisos: list[str] = []
@@ -84,7 +97,17 @@ def _parse_csv_text(csv_content: str) -> dict[str, Any]:
     delimiter = _detect_delimiter(csv_content[:2000])
     reader = csv.reader(io.StringIO(csv_content), delimiter=delimiter)
 
-    headers = next(reader)
+    first_row = next(reader)
+
+    # Headerless detection: if first row is all 0/1 binary, synthesize headers
+    headerless = _is_binary_row(first_row)
+    if headerless:
+        n_cols = len(first_row)
+        headers = [str(i + 1) for i in range(n_cols)]
+        # Re-create reader to include the first row as data
+        reader = csv.reader(io.StringIO(csv_content), delimiter=delimiter)
+    else:
+        headers = first_row
 
     # Find ID column and question columns
     id_col: int | None = None
@@ -99,7 +122,7 @@ def _parse_csv_text(csv_content: str) -> dict[str, Any]:
 
     # If no explicit ID column found but first column header is blank/non-question,
     # treat it as the ID column (common format: ";136;137;..." with data "ALUNO1;0;1;...")
-    if id_col is None and headers and not _is_question_column(headers[0].strip()):
+    if id_col is None and headers and not headerless and not _is_question_column(headers[0].strip()):
         id_col = 0
 
     if not question_cols:

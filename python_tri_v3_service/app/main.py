@@ -727,6 +727,33 @@ async def enem_transformacao(ano: int, area: str):
     )
 
 
+@app.get("/api/v4/enem/provas/{ano}/{area}")
+async def enem_provas(ano: int, area: str):
+    """
+    Lista todas as CO_PROVA disponíveis no banco para um ano × área.
+
+    Retorna:
+        [{"co_prova": int, "descricao": str, "is_reaplicacao": bool}, ...]
+    """
+    client = _require_supabase()
+    area = area.upper()
+
+    r = client.table("enem_codigos_prova").select(
+        "co_prova,descricao_categoria,is_reaplicacao"
+    ).eq("ano", ano).eq("area", area).execute()
+
+    items = [
+        {
+            "co_prova": row["co_prova"],
+            "descricao": row.get("descricao_categoria") or "",
+            "is_reaplicacao": bool(row.get("is_reaplicacao")),
+        }
+        for row in r.data
+    ]
+    items.sort(key=lambda x: x["co_prova"])
+    return items
+
+
 @app.get("/api/v4/enem/itens/{ano}/{area}/{co_prova}", response_model=ProvaINEP)
 async def enem_itens_prova(ano: int, area: str, co_prova: int):
     """Retorna parâmetros oficiais dos itens de uma prova específica."""
@@ -1026,15 +1053,16 @@ async def validar_simulado(
     if n_itens < 10:
         raise HTTPException(status_code=400, detail=f"Poucos itens INEP válidos: {n_itens}")
 
-    # ── 3. Validate response lengths ──
-    if parsed["n_itens"] != n_itens:
+    # ── 3. Validate / align response lengths via position mapping ──
+    # Arquivo do simulado tem respostas posição-a-posição na área (typicamente 45)
+    # Item bank INEP pode ter menos itens (alguns abandonados)
+    # Solução: mapear cada item do banco à sua posição no vetor do aluno
+    offset_area = {"LC": 1, "CH": 46, "CN": 91, "MT": 136}[area]
+    file_n_itens = parsed["n_itens"]
+    if file_n_itens < 30:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Arquivo tem {parsed['n_itens']} itens por aluno, "
-                f"prova INEP {co_prova} tem {n_itens} itens. Verifique se o arquivo "
-                f"corresponde à prova certa."
-            ),
+            detail=f"Arquivo tem apenas {file_n_itens} itens por aluno, mínimo 30.",
         )
 
     # ── 4. Run V3 — local calibration ──
@@ -1058,12 +1086,23 @@ async def validar_simulado(
 
     v3_by_id = {r["aluno_id"]: r for r in resultado_v3["resultados_alunos"]}
 
-    # ── 5. Run V4 — INEP official parameters ──
+    # ── 5. Run V4 — INEP official parameters with position mapping ──
     v4_results: Dict[str, Dict[str, Any]] = {}
     for aluno in alunos_parsed:
-        resp = np.array(aluno["respostas"], dtype=int)
+        resp_vec = aluno["respostas"]  # length = file_n_itens (typically 45)
+        # Align with INEP items by position
+        aligned_binary = []
+        aligned_items = []
+        for it in inep_items:
+            str_idx = it["posicao"] - offset_area  # 0-indexed into area vector
+            if 0 <= str_idx < len(resp_vec):
+                aligned_binary.append(resp_vec[str_idx])
+                aligned_items.append(it)
+        if len(aligned_binary) < 10:
+            continue
+        resp = np.array(aligned_binary, dtype=int)
         acertos = int(resp.sum())
-        theta, _se = eap_theta_cientifico(resp, inep_items)
+        theta, _se = eap_theta_cientifico(resp, aligned_items)
         nota = sigma * theta + mu
         nota = round(float(nota), 1)
         v4_results[aluno["aluno_id"]] = {

@@ -212,40 +212,27 @@ async function loadProvas() {
   const area = $('#area').value;
   if (!ano || !area) return;
 
-  // Fetch prova list via enem info — but it doesn't return co_provas
-  // Alternative: backend lookup via a new endpoint, or enumerate via enem_codigos_prova
-  // For now, fetch info and let user type CO_PROVA if dropdown is empty
   const sel = $('#coProva');
   sel.innerHTML = '<option>Carregando...</option>';
 
   try {
-    // Try loading known provas by scanning codigos_prova
-    // Since we don't have an endpoint for that, we'll fetch items for a range
-    // Simpler: have the backend give us the list via a new small endpoint
-    const r = await fetch('/api/v4/enem/info');
-    const info = await r.json();
-    // We'll fetch all provas by querying /api/v4/enem/itens/{ano}/{area}/{prova}
-    // Actually: we'll use a different approach — fetch ALL codigos via a helper
-
-    // For now, fallback: present a text input
+    const r = await fetch('/api/v4/enem/provas/' + ano + '/' + area);
+    if (!r.ok) throw new Error('Falha ao buscar provas');
+    const provas = await r.json();
     sel.innerHTML = '';
-    const PROVAS_BY_YEAR = {
-      2022: { MT: [1055,1056,1057,1058,1059,1060], CH: [1031,1032,1033,1034], CN: [1043,1044,1045,1046], LC: [1067,1068,1069,1070] },
-      2023: { MT: [1273,1274,1275,1276,1277], CH: [1249,1250,1251,1252], CN: [1261,1262,1263,1264], LC: [1285,1286,1287,1288] },
-      2024: { MT: [1407,1408,1409,1410,1411,1412,1414,1415,1416], CH: [1383,1384,1385,1386,1387,1388,1390,1391,1392], CN: [1419,1420,1421,1422,1423,1424,1426,1427,1428], LC: [1395,1396,1397,1398,1399,1400,1402,1403,1404,1405] }
-    };
-    const provas = (PROVAS_BY_YEAR[ano] && PROVAS_BY_YEAR[ano][area]) || [];
-    if (provas.length === 0) {
-      sel.innerHTML = '<option value="">Sem provas conhecidas</option>';
+    if (!provas || provas.length === 0) {
+      sel.innerHTML = '<option value="">Nenhuma prova disponível</option>';
     } else {
       provas.forEach(p => {
         const opt = document.createElement('option');
-        opt.value = p; opt.textContent = p;
+        opt.value = p.co_prova;
+        const reapTag = p.is_reaplicacao ? ' [Reaplic]' : '';
+        opt.textContent = p.co_prova + ' - ' + (p.descricao || '') + reapTag;
         sel.appendChild(opt);
       });
     }
   } catch (e) {
-    sel.innerHTML = '<option>Erro</option>';
+    sel.innerHTML = '<option>Erro: ' + e.message + '</option>';
   }
 
   // Toggle language field for LC

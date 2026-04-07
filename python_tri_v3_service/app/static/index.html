@@ -267,12 +267,32 @@ function getRef(acertos){
 }
 
 // ── Anchoring methods ──
+// Smoothing band by group size — keeps small groups tight around tri_med,
+// allows full spread only for groups with 11+ students
+function smoothingBand(groupSize, refMin, refMed, refMax){
+  if(groupSize<=1)return [refMed,refMed];
+  if(refMin===refMax)return [refMin,refMax];
+  if(groupSize>=11)return [refMin,refMax];
+  let bandPct;
+  if(groupSize===2)bandPct=0.20;
+  else if(groupSize<=5)bandPct=0.40;
+  else bandPct=0.70;  // 6 to 10
+  const halfMax=Math.max(refMax-refMed, refMed-refMin);
+  const halfWidth=halfMax*bandPct;
+  return [
+    Math.max(refMin, refMed-halfWidth),
+    Math.min(refMax, refMed+halfWidth)
+  ];
+}
+
 // anchorIntragrupo is applied AFTER sorting — it uses the rank, not theta directly
 function anchorIntragrupo(rank,total,acertos){
   const r=getRef(acertos); if(!r)return 0;
   if(r.tri_min===r.tri_max||total<=1)return r.tri_med;
+  const [bandMin,bandMax]=smoothingBand(total, r.tri_min, r.tri_med, r.tri_max);
+  if(bandMin===bandMax)return bandMin;
   const pct=rank/Math.max(total-1,1);
-  return r.tri_min+pct*(r.tri_max-r.tri_min);
+  return bandMin+pct*(bandMax-bandMin);
 }
 function anchorCdfTheta(theta,acertos){
   const r=getRef(acertos);if(!r)return 0;
@@ -462,14 +482,22 @@ function renderV4Results(v4Data,rawV4){
   $('#btnDownloadExcel').style.display='inline-block';
 }
 
-// Hardcoded CO_PROVA list (first application) per year × area
-const PROVAS_V4={
-  2022:{MT:[1055,1056,1057,1058,1059,1060],CH:[1031,1032,1033,1034,1035,1036],CN:[1043,1044,1045,1046,1047,1048],LC:[1067,1068,1069,1070,1071,1072]},
-  2023:{MT:[1273,1274,1275,1276,1277,1278],CH:[1249,1250,1251,1252,1253,1254],CN:[1261,1262,1263,1264,1265,1266],LC:[1285,1286,1287,1288,1289,1290]},
-  2024:{MT:[1407,1408,1409,1410,1411,1412,1414,1415,1416],CH:[1383,1384,1385,1386,1387,1388,1390,1391,1392],CN:[1419,1420,1421,1422,1423,1424,1426,1427,1428],LC:[1395,1396,1397,1398,1399,1400,1402,1403,1404,1405]},
-};
+// Cache of loaded provas: key "ano_area" -> list
+const provasCache={};
 
-function updateV4Fields(){
+async function loadProvasForV4(ano, area){
+  const key=ano+'_'+area;
+  if(provasCache[key])return provasCache[key];
+  try{
+    const resp=await fetch('/api/v4/enem/provas/'+ano+'/'+area);
+    if(!resp.ok)return [];
+    const data=await resp.json();
+    provasCache[key]=data;
+    return data;
+  }catch(e){return []}
+}
+
+async function updateV4Fields(){
   const mode=document.querySelector('input[name="mode"]:checked').value;
   const area=$('#area').value, ano=$('#ano').value;
   const isV4=(mode==='v4');
@@ -480,14 +508,18 @@ function updateV4Fields(){
   $('#linguaLabel').style.display=showLingua?'inline-block':'none';
 
   if(isV4&&ano&&area){
-    const provas=(PROVAS_V4[ano]&&PROVAS_V4[ano][area])||[];
+    $('#coProva').innerHTML='<option>Carregando...</option>';
+    const provas=await loadProvasForV4(ano, area);
     $('#coProva').innerHTML='';
-    if(provas.length===0){
-      const opt=document.createElement('option');opt.value='';opt.textContent='(nenhuma conhecida)';
+    if(!provas || provas.length===0){
+      const opt=document.createElement('option');opt.value='';opt.textContent='(nenhuma disponível)';
       $('#coProva').appendChild(opt);
     }else{
       provas.forEach(p=>{
-        const opt=document.createElement('option');opt.value=p;opt.textContent=p;
+        const opt=document.createElement('option');
+        opt.value=p.co_prova;
+        const reapTag=p.is_reaplicacao?' [Reaplic]':'';
+        opt.textContent=p.co_prova+' - '+(p.descricao||'')+reapTag;
         $('#coProva').appendChild(opt);
       });
     }
