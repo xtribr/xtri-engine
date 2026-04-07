@@ -74,6 +74,12 @@ from .motores.cientifico import (
     estado_tri,
 )
 from .db.supabase_client import get_supabase, is_supabase_configured
+from .enriquecimento import (
+    build_resultado_estruturado,
+    build_metodologia_banner,
+    build_coorte_stats,
+    NACIONAL_STATS,
+)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -615,8 +621,88 @@ async def processar_csv(
             tri_max=ref["tri_max"],
         ))
 
+    # ── V2.1 Enrichment: 9 dimensions per student + methodology banner + cohort stats ──
+    raw_results = resultado["resultados_alunos"]
+    all_thetas_list = [float(r["theta"]) for r in raw_results]
+    all_notas_list = [float(r["nota_ancorada"]) for r in raw_results]
+    all_acertos_list = [int(r["acertos"]) for r in raw_results]
+
+    cohort_mean = float(np.mean(all_thetas_list)) if all_thetas_list else 0.0
+    cohort_std_val = float(np.std(all_thetas_list)) if all_thetas_list else 1.0
+
+    # Rank students within cohort (higher nota = better rank, 1-based)
+    sorted_by_nota = sorted(raw_results, key=lambda r: -r["nota_ancorada"])
+    rank_by_id = {r["aluno_id"]: i + 1 for i, r in enumerate(sorted_by_nota)}
+
+    # Get sigma/mu from supabase if available, else use empirical defaults
+    sigma_oficial, mu_oficial = 100.0, 500.0
+    if is_supabase_configured():
+        try:
+            sb = get_supabase()
+            tr = sb.table("enem_transformacoes").select("*").eq("ano", ano_referencia).eq("area", area).limit(1).execute()
+            if tr.data:
+                sigma_oficial = float(tr.data[0]["sigma"])
+                mu_oficial = float(tr.data[0]["mu"])
+        except Exception:
+            pass
+
+    # Item difficulty subgroup counts (Primi)
+    n_faceis_total = diag.get("itens_faceis", 0)
+    n_medios_total = diag.get("itens_medios", 0)
+    n_dificeis_total = diag.get("itens_dificeis", 0)
+
+    resultados_estruturados: list[dict] = []
+    for r in raw_results:
+        ref = tab.obter(area, r["acertos"]) if r["acertos"] in tab.lookup.get(area, {}) else {
+            "tri_min": 0, "tri_med": 0, "tri_max": 1000
+        }
+        estr = build_resultado_estruturado(
+            aluno_id=r["aluno_id"],
+            acertos=r["acertos"],
+            total_itens=diag["n_itens"],
+            theta=r["theta"],
+            se=r.get("se", 0.0),
+            nota=r["nota_ancorada"],
+            cohort_mean=cohort_mean,
+            cohort_std=cohort_std_val,
+            rank_in_cohort=rank_by_id[r["aluno_id"]],
+            total_in_cohort=len(raw_results),
+            area=area,
+            ano=ano_referencia,
+            sigma_oficial=sigma_oficial,
+            mu_oficial=mu_oficial,
+            ref_min=ref["tri_min"],
+            ref_med=ref["tri_med"],
+            ref_max=ref["tri_max"],
+            acert_dif=r.get("acert_dif", 0.0),
+            n_itens_faceis_acertados=r.get("acertos_faceis", 0),
+            n_itens_medios_acertados=r.get("acertos_medios", 0),
+            n_itens_dificeis_acertados=r.get("acertos_dificeis", 0),
+            n_itens_dificeis_total=n_dificeis_total,
+        )
+        resultados_estruturados.append(estr)
+
+    metodologia = build_metodologia_banner(
+        area=area,
+        ano=ano_referencia,
+        n_alunos=len(raw_results),
+        cohort_mean=cohort_mean,
+        cohort_std=cohort_std_val,
+        acertos_medio=float(np.mean(all_acertos_list)) if all_acertos_list else 0.0,
+        n_itens=diag["n_itens"],
+        nota_media=diag["nota_media"],
+    )
+
+    coorte_stats = build_coorte_stats(
+        thetas=all_thetas_list,
+        notas=all_notas_list,
+        acertos=all_acertos_list,
+        n_itens=diag["n_itens"],
+        area=area,
+    )
+
     elapsed = time.time() - t0
-    print(f"[CSV] Done in {elapsed:.2f}s")
+    print(f"[CSV] Done in {elapsed:.2f}s — V2.1 enrichment {len(resultados_estruturados)} students")
 
     return ResponseProcessarCSV(
         status="sucesso",
@@ -628,6 +714,9 @@ async def processar_csv(
         referencia=referencia,
         avisos=avisos,
         tempo_processamento=round(elapsed, 2),
+        resultados_estruturados=resultados_estruturados,
+        metodologia=metodologia,
+        coorte_stats=coorte_stats,
     )
 
 

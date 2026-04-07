@@ -222,6 +222,135 @@ class ResponseProcessarCSV(BaseModel):
     referencia: List[PontoReferencia] = []
     avisos: List[str] = []
     tempo_processamento: float = 0.0
+    # V2.1: enriched per-student data with 8 dimensions
+    resultados_estruturados: List[Dict[str, Any]] = []
+    metodologia: Optional[Dict[str, Any]] = None  # banner/diagnóstico data
+    coorte_stats: Optional[Dict[str, Any]] = None  # cohort-level statistics
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — V2.1 ENRICHED OUTPUT (8 dimensões por aluno)
+# ════════════════════════════════════════════════════════════════════════════════
+
+class DimRaw(BaseModel):
+    """Dimensão 1: Dados brutos do aluno."""
+    acertos: int
+    total_itens: int
+    pct_acerto: float
+
+
+class DimIRT(BaseModel):
+    """Dimensão 2: Estimativa IRT (theta + estatísticas da coorte)."""
+    theta: float
+    se: float
+    z_cohort: float  # z-score do theta dentro da coorte
+    percentil_cohort: float  # 0-100, posição percentual na coorte
+    metodo_calibracao: str = "MML + L-BFGS-B + EAP (Gauss-Hermite quadrature)"
+
+
+class DimAncoragem(BaseModel):
+    """Faixa de referência oficial INEP para esse número de acertos."""
+    tri_min: float
+    tri_med: float
+    tri_max: float
+    tri_maxima_oficial_area: float
+    tri_minima_oficial_area: float
+
+
+class DimPerformance(BaseModel):
+    """Dimensão 3: Nota TRI calculada e como foi obtida."""
+    nota_tri: float
+    metodo_ancoragem: str
+    ancoragem: DimAncoragem
+
+
+class DimComparacaoNacional(BaseModel):
+    """Comparação com a distribuição nacional do ENEM."""
+    mediana_nacional: float
+    p99_real: float
+    p99_9_real: float
+    max_real: float
+    percentil_estimado_nacional: float  # 0-100, posição estimada nacionalmente
+
+
+class DimDesempenhoPedagogico(BaseModel):
+    """Dimensão 4: Interpretação pedagógica do score."""
+    nivel: str  # AVANCADO, PROFICIENTE, BASICO, ELEMENTAR, INICIANTE
+    interpretacao: str  # human-readable
+    descricao_pedagogica: str  # what this level can do
+    comparacao_nacional: DimComparacaoNacional
+
+
+class DimPosicaoRelativa(BaseModel):
+    """Dimensão 5: Posição do aluno relativa à coorte e ao Brasil."""
+    rank_cohort: int  # 1-based, 1 = melhor da turma
+    total_cohort: int
+    percentil_cohort: float  # 0-100
+    alunos_acima_cohort: int
+    alunos_abaixo_cohort: int
+    posicao_nacional_estimada_pct: float  # 0-100
+
+
+class DimProjecaoAprovacao(BaseModel):
+    """Dimensão 6: Projeção em vestibulares e cursos."""
+    sisu_baixa_concorrencia: bool  # cursos com corte 400-500 (Letras, Pedagogia)
+    sisu_media_concorrencia: bool  # cursos 500-650 (Engenharia média, Adm)
+    sisu_alta_concorrencia: bool   # cursos 650-750 (Eng top, Direito)
+    sisu_topo: bool                # Medicina (>750)
+    cursos_provaveis: List[str] = []
+    cursos_disputados: List[str] = []
+    observacao: str
+
+
+class DimRecomendacoes(BaseModel):
+    """Dimensão 7: Recomendações pedagógicas."""
+    pontos_fortes: List[str] = []
+    pontos_atencao: List[str] = []
+    foco_estudo: str
+    tempo_estudo_estimado_h: int  # horas/semana sugeridas
+    estrategia: str
+
+
+class DimPrimi(BaseModel):
+    """Dimensão 8: Métricas de Primi (acert_dif, multidimensionalidade)."""
+    acert_dif: float  # proporção de itens difíceis acertados
+    interpretacao: str
+    itens_faceis_acertados: int
+    itens_medios_acertados: int
+    itens_dificeis_acertados: int
+    fator_secundario_detectado: bool = False
+    nota_referencia: str = (
+        "Métrica baseada em Primi & Cicchetto (2019). "
+        "Estudantes com alto acert_dif e baixos acertos totais podem ser "
+        "subestimados pelo modelo 3PL unidimensional."
+    )
+
+
+class DimReferenciaINEP(BaseModel):
+    """Dimensão 9: Conexão com referências oficiais INEP."""
+    ano_referencia: int
+    area: str
+    transformacao_oficial: Dict[str, Any]
+    metodologia_inep_url: str = (
+        "https://www.gov.br/inep/pt-br/areas-de-atuacao/avaliacao-e-exames-educacionais/enem"
+    )
+    papers_relacionados: List[Dict[str, str]] = []
+    validacao_xtri: Dict[str, Any]
+
+
+class ResultadoAlunoEstruturado(BaseModel):
+    """Aluno com 9 dimensões enriquecidas (V2.1)."""
+    aluno_id: str
+    raw: DimRaw
+    irt: DimIRT
+    performance: DimPerformance
+    desempenho_pedagogico: DimDesempenhoPedagogico
+    posicao_relativa: DimPosicaoRelativa
+    projecao_aprovacao: DimProjecaoAprovacao
+    recomendacoes: DimRecomendacoes
+    primi: DimPrimi
+    referencia_inep: DimReferenciaINEP
+    metadata: Dict[str, Any]
 
 
 # ════════════════════════════════════════════════════════════════════════════════

@@ -60,15 +60,47 @@ Three principled fixes:
    - Minimum 12 format combinations covered
    - Any new file format must be added as a test, not just a patch
 
-### Phase 4: Implement the Fix [pending]
+### Phase 4: Implement the Fix [SUPERSEDED by V2.1]
 
-Only AFTER Phase 1-3 give clarity. No premature coding.
+The user has chosen a more ambitious path: full data enrichment + UX feedback.
 
-### Phase 5: Validate with All Existing Files [pending]
+### Phase 5: V2.1 Enriched Output + UX Methodology Feedback [in_progress]
 
-- [ ] Re-test mat.csv, dados-mat.xlsx, cn.txt, LC.txt, CH.txt, mat.txt
-- [ ] All must work with zero code changes after Phase 4
-- [ ] Run full pytest suite (must stay 119+ passing)
+User decisions:
+- Schema: Option B (parallel — keep flat `resultados`, add rich `resultados_estruturados`)
+- UX: All 3 (1A banner + 1B per-student modal + 1C methodology panel)
+- Score types: 8 dimensions (raw, irt, performance, desempenho_pedagogico, posicao_relativa, projecao_aprovacao, recomendacoes, primi) + referencia_inep metadata
+- Always connect to INEP official (citations, validation metrics, methodology links)
+- Single-user, future macOS native app
+
+#### Phase 5A: Backend Schema [pending]
+- New Pydantic models for the 8 dimensions
+- New helper functions: compute_z_cohort, compute_percentil_nacional, classify_pedagogico, sisu_projection, primi_analysis
+- New referencia table for SISU cutoffs and pedagogical interpretations
+- Endpoint /api/v3/processar-csv adds `resultados_estruturados` field
+
+#### Phase 5B: UX 1A — Methodology Banner [pending]
+- After processing, show a banner with method, cohort stats, warnings
+- "validado contra 360K alunos INEP, MAE 0.025"
+- Warn if cohort acertos avg > P95 nacional
+
+#### Phase 5C: UX 1B — Per-Student Modal [pending]
+- Click student row → modal showing all 8 dimensions
+- Charts: position in cohort, position nationally, breakdown by dimension
+- Specific study recommendations
+
+#### Phase 5D: UX 1C — Methodology Panel [pending]
+- Collapsible "Diagnóstico Metodológico" at bottom
+- Formula display
+- Reference table visualization
+- Empirical sigma/mu derivation
+- Cited papers with links
+
+### Phase 6: Validate Everything [pending]
+- All 119 tests still passing
+- New schema tests (10+)
+- All 5 corpus files still process correctly
+- New endpoint returns enriched data
 
 ## Files Created/Modified Tracking
 
