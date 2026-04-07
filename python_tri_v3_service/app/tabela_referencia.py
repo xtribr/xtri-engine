@@ -9,12 +9,32 @@ import json
 import os
 from typing import Dict, Optional
 
-# Limites máximos oficiais do ENEM (teto absoluto histórico)
+# Limites máximos EMPIRICOS observados nos microdados ENEM 2022/2023/2024
+# (max real + ~5 pts buffer para variabilidade de amostragem entre anos)
+#
+# Valores reais máximos observados (100K-200K alunos por ano):
+#   LC: 2022=764.6  2023=758.6  2024=795.8  → max global 795.8 → teto 800
+#   CH: 2022=829.1  2023=823.0  2024=819.7  → max global 829.1 → teto 835
+#   CN: 2022=868.7  2023=868.4  2024=867.2  → max global 868.7 → teto 875
+#   MT: 2022=983.9  2023=958.6  2024=961.9  → max global 983.9 → teto 990
+#
+# Importante: valores anteriores eram superestimados (LC 835 vs real 795).
+# 99% dos alunos LC ficam abaixo de 670. O P99.99 (top 0.01%) é ~745.
+# Apenas 1 em cada 10000 alunos chega perto do teto.
 TRI_MAXIMA_OFICIAL = {
-    'LC': 835.0,   # Teto histórico conservador (top histórico ~835)
-    'CH': 855.0,   # Média histórica 45 acertos ≈ 856.5
-    'CN': 875.0,   # Média histórica 45 acertos ≈ 876.9
-    'MT': 990.0,   # Média histórica 45 acertos ≈ 994.8 (conservador, nunca 1000)
+    'LC': 800.0,
+    'CH': 835.0,
+    'CN': 875.0,
+    'MT': 990.0,
+}
+
+# Percentis 99.9 reais (top 0.1% dos alunos) — útil para sanity check
+# de calibrações locais agressivas
+TRI_P999_REAL = {
+    'LC': 720.0,
+    'CH': 770.0,
+    'CN': 780.0,
+    'MT': 920.0,
 }
 
 # Limites mínimos oficiais do ENEM
