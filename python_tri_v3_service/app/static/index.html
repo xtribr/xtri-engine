@@ -148,7 +148,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       <div class="tune-item">
         <label>Metodo:</label>
         <select id="anchorMethod" title="Metodo de ancoragem para converter theta em nota ENEM">
-          <option value="mediana_ancorada" selected>Rank Intragrupo (Primi)</option>
+          <option value="mediana_ancorada" selected>Cohort-Anchored (z-score → tri_min/med/max)</option>
           <option value="percentil_turma">Percentil na Turma</option>
           <option value="mediana_acertos">Mediana por Acertos</option>
           <option value="cdf_theta">CDF do Theta (legacy)</option>
@@ -267,32 +267,20 @@ function getRef(acertos){
 }
 
 // ── Anchoring methods ──
-// Smoothing band by group size — keeps small groups tight around tri_med,
-// allows full spread only for groups with 11+ students
-function smoothingBand(groupSize, refMin, refMed, refMax){
-  if(groupSize<=1)return [refMed,refMed];
-  if(refMin===refMax)return [refMin,refMax];
-  if(groupSize>=11)return [refMin,refMax];
-  let bandPct;
-  if(groupSize===2)bandPct=0.20;
-  else if(groupSize<=5)bandPct=0.40;
-  else bandPct=0.70;  // 6 to 10
-  const halfMax=Math.max(refMax-refMed, refMed-refMin);
-  const halfWidth=halfMax*bandPct;
-  return [
-    Math.max(refMin, refMed-halfWidth),
-    Math.min(refMax, refMed+halfWidth)
-  ];
-}
-
-// anchorIntragrupo is applied AFTER sorting — it uses the rank, not theta directly
-function anchorIntragrupo(rank,total,acertos){
+// Cohort-Anchored Distribution: z-score normalization within cohort +
+// percentile mapping into [tri_min, tri_med, tri_max] of the official table
+function anchorCohortAnchored(theta, acertos, cohortMean, cohortStd){
   const r=getRef(acertos); if(!r)return 0;
-  if(r.tri_min===r.tri_max||total<=1)return r.tri_med;
-  const [bandMin,bandMax]=smoothingBand(total, r.tri_min, r.tri_med, r.tri_max);
-  if(bandMin===bandMax)return bandMin;
-  const pct=rank/Math.max(total-1,1);
-  return bandMin+pct*(bandMax-bandMin);
+  if(r.tri_min===r.tri_max)return r.tri_med;
+  const std=cohortStd<1e-6?1.0:cohortStd;
+  const z=(theta-cohortMean)/std;
+  const pct=normCdf(z);
+  if(pct<=0.5){
+    const localPct=pct/0.5;
+    return r.tri_min+localPct*(r.tri_med-r.tri_min);
+  }
+  const localPct=(pct-0.5)/0.5;
+  return r.tri_med+localPct*(r.tri_max-r.tri_med);
 }
 function anchorCdfTheta(theta,acertos){
   const r=getRef(acertos);if(!r)return 0;
@@ -542,23 +530,23 @@ function reanchor(){
   // Compute adjusted thetas
   const adjusted=rawThetas.map(r=>({...r,thetaAdj:(r.theta+shift)*scale}));
 
-  // For intra-group methods, group by acertos and rank within each group
-  if(method==='mediana_ancorada'){
-    const groups={};
-    adjusted.forEach(r=>{if(!groups[r.acertos])groups[r.acertos]=[];groups[r.acertos].push(r)});
-    Object.values(groups).forEach(g=>{g.sort((a,b)=>a.thetaAdj-b.thetaAdj);g.forEach((r,i)=>{r.groupRank=i;r.groupSize=g.length})});
-  }
+  // Cohort statistics (used by mediana_ancorada — Cohort-Anchored Distribution)
+  const adjThetas=adjusted.map(r=>r.thetaAdj);
+  const cohortMean=adjThetas.reduce((s,v)=>s+v,0)/adjThetas.length;
+  const cohortVar=adjThetas.reduce((s,v)=>s+(v-cohortMean)*(v-cohortMean),0)/adjThetas.length;
+  const cohortStd=Math.sqrt(cohortVar);
+
   // For percentil method, sort by theta and assign global ranks
   if(method==='percentil_turma'){adjusted.sort((a,b)=>a.thetaAdj-b.thetaAdj);adjusted.forEach((r,i)=>{r.rank=i})}
   // Compute notas
   let dentro=0;
   adjusted.forEach(r=>{
     let nota;
-    if(method==='mediana_ancorada')nota=anchorIntragrupo(r.groupRank||0,r.groupSize||1,r.acertos);
+    if(method==='mediana_ancorada')nota=anchorCohortAnchored(r.thetaAdj,r.acertos,cohortMean,cohortStd);
     else if(method==='cdf_theta')nota=anchorCdfTheta(r.thetaAdj,r.acertos);
     else if(method==='mediana_acertos')nota=anchorMedianaAcertos(r.thetaAdj,r.acertos);
     else if(method==='percentil_turma')nota=anchorPercentilTurma(r.thetaAdj,r.acertos,r.rank,adjusted.length);
-    else nota=anchorIntragrupo(r.groupRank||0,r.groupSize||1,r.acertos);
+    else nota=anchorCohortAnchored(r.thetaAdj,r.acertos,cohortMean,cohortStd);
     nota=Math.round(nota*10)/10;
     r.nota=nota;r.estado=estadoTri(nota);
     const ref2=getRef(r.acertos);
@@ -606,7 +594,9 @@ function reanchor(){
 function updateSliderState(){
   const m=$('#anchorMethod').value;
   // Shift/Scale only affect methods that use absolute theta values
-  const disabled=(m==='mediana_ancorada'||m==='mediana_acertos');
+  // Mediana_acertos ignores theta entirely; Cohort-Anchored now uses theta absolute,
+  // so shift/scale ARE meaningful (they shift the cohort distribution and re-anchor)
+  const disabled=(m==='mediana_acertos');
   $('#sliderShift').disabled=disabled;
   $('#sliderScale').disabled=disabled;
   $('#sliderShift').style.opacity=disabled?'0.3':'1';
