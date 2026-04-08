@@ -221,6 +221,21 @@ Two features described in the user's April 8 request (shared alongside `mente_ma
   - Output saved to `/tmp/microdata_dashboards/` for inspection
   - Visual: matches the user's reference image structure exactly. Correlations from the calibration are visible in scatter titles (LC r=0.950, CH r=0.971, CN r=0.930, MT r=0.949).
 
+**Phase 8 P5 complete (2026-04-08, commit pending)**:
+
+- 6 new FastAPI routes under `/api/v5/microdata/`:
+  - `GET /anos-disponiveis` — discovers years from `microdata/` dir
+  - `GET /status/{year}` — file presence + raw/calibrated cache state for one year
+  - `POST /prepare` — kicks off load+calibration via `asyncio.run_in_executor`, returns job_id immediately
+  - `GET /job/{job_id}` — poll progress (queued|running|done|error, 0-1 progress, current stage)
+  - `GET /dashboard/{year}?area=MT` — single-area 1×3 PNG (base64) + summary metrics + difficulty table
+  - `GET /full-report/{year}` — 4×3 PNG (base64) + per-area summaries
+- New module `app/microdata/jobs.py` — thread-safe in-memory `JobManager` singleton (single-user, no Redis/DB), tracks job state with stage names and 0-1 progress.
+- New Pydantic models in `models.py`: MicrodataAvailabilityResponse, MicrodataYearStatus, MicrodataPrepareRequest/Response, MicrodataJobStatusResponse, MicrodataDifficultyRow, MicrodataAreaSummary, MicrodataAreaDashboardResponse, MicrodataFullReportResponse.
+- Background runner `_run_microdata_pipeline` in `main.py` orchestrates load→cache→calibrate→cache, calling `update_progress` at each stage. Uses the existing Phase 1-4 modules end-to-end.
+- 10 new TestClient unit tests covering: route existence, 404 handling, 400 invalid area, base64 PNG decode + magic check, real-data full pipeline against the cached parquet.
+- Full suite 179 green (was 169 before P5).
+
 **Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)

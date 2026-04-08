@@ -63,6 +63,16 @@ from .models import (
     ResultadoComparacao,
     EstatisticasComparacao,
     ResponseValidarSimulado,
+    # V5 — Microdata Analysis (Phase 8)
+    MicrodataAvailabilityResponse,
+    MicrodataYearStatus,
+    MicrodataPrepareRequest,
+    MicrodataPrepareResponse,
+    MicrodataJobStatusResponse,
+    MicrodataAreaSummary,
+    MicrodataDifficultyRow,
+    MicrodataAreaDashboardResponse,
+    MicrodataFullReportResponse,
 )
 from .tabela_referencia import TabelaReferenciaTRI
 from .csv_parser import parse_single_area
@@ -1275,6 +1285,309 @@ async def validar_simulado(
         resultados=comparacoes,
         avisos=avisos,
         tempo_processamento=round(time.time() - t0, 3),
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# V5 — MICRODATA ANALYSIS ENDPOINTS (Phase 8)
+# ════════════════════════════════════════════════════════════════════════════════
+# These routes wire the app/microdata/ pipeline (loader → cache → calibration
+# → matplotlib dashboards) into the FastAPI surface. The frontend kicks off
+# a long-running pipeline via POST /prepare, polls /job/{id} for status, then
+# fetches base64-encoded PNG dashboards once status==done.
+
+import asyncio  # noqa: PLC0415
+import base64  # noqa: PLC0415
+
+from .microdata import (  # noqa: PLC0415
+    calibrate_all_areas,
+    calibration_summary,
+    compute_difficulty_table,
+    detect_schema,
+    load_microdata,
+    render_area_dashboard,
+    render_full_report,
+)
+from .microdata.cache import (  # noqa: PLC0415
+    cache_key,
+    load_cached,
+    save_cached,
+)
+from .microdata.jobs import (  # noqa: PLC0415
+    JOB_DONE,
+    JOB_ERROR,
+    JOB_RUNNING,
+    job_manager,
+)
+from .microdata.loader import (  # noqa: PLC0415
+    default_csv_path,
+    discover_available_years,
+    load_primeira_aplicacao_provas,
+    MICRODATA_DIR,
+)
+
+
+def _run_microdata_pipeline(
+    job_id: str, year: int, sample_size: int, rng_seed: int, force_rerun: bool
+) -> None:
+    """Background runner for one microdata pipeline job.
+
+    Runs in a thread (via asyncio.run_in_executor) so it doesn't block the
+    uvicorn worker. Updates job state via the singleton job_manager.
+    """
+    try:
+        job_manager.mark_running(job_id)
+        csv_path = default_csv_path(year)
+        if not csv_path.is_file():
+            raise FileNotFoundError(
+                f"Microdata CSV not found at {csv_path}. "
+                f"Drop MICRODADOS_ENEM_{year}.csv in {MICRODATA_DIR}/"
+            )
+
+        raw_key = cache_key(csv_path, year=year, sample_size=sample_size, rng_seed=rng_seed)
+        calib_key = raw_key.with_stage("calibrated")
+
+        # Stage 1: load + filter + sample (or load from cache)
+        job_manager.update_progress(job_id, progress=0.05, stage="loading microdata")
+        if not force_rerun:
+            cached_calib = load_cached(calib_key)
+            if cached_calib is not None:
+                # Calibrated cache hit — done immediately
+                job_manager.mark_done(job_id, result_key=calib_key)
+                return
+
+        df = None
+        if not force_rerun:
+            df = load_cached(raw_key)
+        if df is None:
+            job_manager.update_progress(job_id, progress=0.10, stage="streaming CSV")
+            df = load_microdata(
+                year=year,
+                sample_size=sample_size,
+                rng_seed=rng_seed,
+                provas_primeira=load_primeira_aplicacao_provas(year),
+            )
+            save_cached(df, raw_key, source_path=csv_path, filters_description="v5 raw")
+        job_manager.update_progress(job_id, progress=0.30, stage="raw sample ready")
+
+        # Stage 2: calibrate all areas
+        schema = detect_schema(csv_path)
+        tabela = tabelas_multiano.get(year)
+        if tabela is None:
+            raise ValueError(
+                f"No reference table loaded for year {year}. "
+                f"Available: {sorted(tabelas_multiano.keys())}"
+            )
+
+        def on_progress(area, idx, total, n_done):
+            # Each area is one quarter of the calibration phase
+            area_idx = ["LC", "CH", "CN", "MT"].index(area)
+            within_area = idx / total if total > 0 else 1.0
+            overall = 0.30 + 0.65 * (area_idx + within_area) / 4
+            job_manager.update_progress(
+                job_id, progress=overall, stage=f"calibrating {area} ({idx}/{total})"
+            )
+
+        enriched = calibrate_all_areas(df, schema, tabela, progress_callback=on_progress)
+        job_manager.update_progress(job_id, progress=0.95, stage="caching results")
+        save_cached(
+            enriched, calib_key, source_path=csv_path, filters_description="v5 calibrated"
+        )
+
+        job_manager.mark_done(job_id, result_key=calib_key)
+    except Exception as exc:  # noqa: BLE001
+        job_manager.mark_error(job_id, f"{type(exc).__name__}: {exc}")
+
+
+def _summary_to_model(summary_dict: dict) -> "MicrodataAreaSummary":
+    """Convert calibration_summary() output for one area into the response model."""
+    return MicrodataAreaSummary(
+        n=int(summary_dict.get("n", 0)),
+        correlation=summary_dict.get("correlation"),
+        mae=summary_dict.get("mae"),
+        rmse=summary_dict.get("rmse"),
+        mean_v3=summary_dict.get("mean_v3"),
+        mean_ref=summary_dict.get("mean_ref"),
+        mean_shift=summary_dict.get("mean_shift"),
+    )
+
+
+@app.get("/api/v5/microdata/anos-disponiveis", response_model=MicrodataAvailabilityResponse)
+async def v5_anos_disponiveis():
+    """List ENEM years that have a MICRODADOS_ENEM_<year>.csv on disk."""
+    return MicrodataAvailabilityResponse(
+        anos=discover_available_years(),
+        microdata_dir=str(MICRODATA_DIR),
+    )
+
+
+@app.get("/api/v5/microdata/status/{year}", response_model=MicrodataYearStatus)
+async def v5_microdata_status(year: int):
+    """Report file presence + cache state for one year. Always 200 (no 404)."""
+    csv_path = default_csv_path(year)
+    csv_exists = csv_path.is_file()
+
+    csv_size_mb = None
+    csv_mtime = None
+    raw_present = False
+    calib_present = False
+    n_sample = None
+
+    if csv_exists:
+        stat = csv_path.stat()
+        csv_size_mb = round(stat.st_size / (1024 * 1024), 1)
+        csv_mtime = stat.st_mtime
+        # Check both raw and calibrated cache existence for the default 200K sample
+        try:
+            raw_key = cache_key(csv_path, year=year, sample_size=200_000, rng_seed=42)
+            raw_present = raw_key.parquet_path.is_file()
+            calib_present = raw_key.with_stage("calibrated").parquet_path.is_file()
+            if calib_present:
+                n_sample = 200_000
+            elif raw_present:
+                n_sample = 200_000
+        except Exception:  # noqa: BLE001
+            pass
+
+    return MicrodataYearStatus(
+        year=year,
+        csv_path=str(csv_path),
+        csv_exists=csv_exists,
+        csv_size_mb=csv_size_mb,
+        csv_mtime=csv_mtime,
+        cache_raw_present=raw_present,
+        cache_calibrated_present=calib_present,
+        n_sample=n_sample,
+    )
+
+
+@app.post("/api/v5/microdata/prepare", response_model=MicrodataPrepareResponse)
+async def v5_microdata_prepare(req: MicrodataPrepareRequest):
+    """Kick off the load + calibrate pipeline asynchronously.
+
+    Returns immediately with a job_id. Frontend polls /job/{id} for progress.
+    If the calibrated cache for this (year, sample_size, seed) already exists
+    AND force_rerun is False, the job completes synchronously inside the
+    executor and the next /job/{id} call returns ``done``.
+    """
+    csv_path = default_csv_path(req.year)
+    if not csv_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Microdata CSV not found at {csv_path}. "
+                f"Download MICRODADOS_ENEM_{req.year}.csv from INEP and copy to "
+                f"{MICRODATA_DIR}/"
+            ),
+        )
+
+    job = job_manager.create(
+        year=req.year, sample_size=req.sample_size, rng_seed=req.rng_seed
+    )
+
+    # Offload the heavy work to a worker thread so we don't block uvicorn.
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(
+        None,
+        _run_microdata_pipeline,
+        job.job_id,
+        req.year,
+        req.sample_size,
+        req.rng_seed,
+        req.force_rerun,
+    )
+
+    return MicrodataPrepareResponse(
+        job_id=job.job_id,
+        status=job.status,
+        message=f"Pipeline started for year {req.year}, sample={req.sample_size}",
+    )
+
+
+@app.get("/api/v5/microdata/job/{job_id}", response_model=MicrodataJobStatusResponse)
+async def v5_microdata_job(job_id: str):
+    """Poll a running pipeline job."""
+    job = job_manager.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Unknown job_id: {job_id}")
+    return MicrodataJobStatusResponse(
+        job_id=job.job_id,
+        status=job.status,
+        progress=job.progress,
+        stage=job.stage,
+        started_at=job.started_at,
+        elapsed_seconds=job.elapsed_seconds,
+        error=job.error,
+    )
+
+
+def _load_calibrated_or_404(year: int) -> "tuple":
+    """Helper: load the calibrated DataFrame for a year or raise 404.
+
+    Returns ``(df, csv_path)``. Used by both dashboard endpoints below.
+    """
+    csv_path = default_csv_path(year)
+    if not csv_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Microdata CSV not found for year {year}")
+    raw_key = cache_key(csv_path, year=year, sample_size=200_000, rng_seed=42)
+    calib_key = raw_key.with_stage("calibrated")
+    df = load_cached(calib_key)
+    if df is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No calibrated cache for year {year}. "
+                f"POST /api/v5/microdata/prepare first."
+            ),
+        )
+    return df, csv_path
+
+
+@app.get(
+    "/api/v5/microdata/dashboard/{year}",
+    response_model=MicrodataAreaDashboardResponse,
+)
+async def v5_microdata_dashboard(year: int, area: str):
+    """Single-area dashboard: 1×3 PNG + summary + difficulty table."""
+    area = area.upper()
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Invalid area: {area}")
+
+    df, _ = _load_calibrated_or_404(year)
+
+    summary = calibration_summary(df).get(area.lower(), {"n": 0})
+    png_bytes = render_area_dashboard(df, area)
+    png_b64 = base64.b64encode(png_bytes).decode("ascii")
+    diff_rows = compute_difficulty_table(df, area)
+
+    return MicrodataAreaDashboardResponse(
+        year=year,
+        area=area,
+        n_students=int(summary.get("n", 0)),
+        summary=_summary_to_model(summary),
+        dashboard_png_base64=png_b64,
+        difficulty_table=[MicrodataDifficultyRow(**r) for r in diff_rows],
+    )
+
+
+@app.get(
+    "/api/v5/microdata/full-report/{year}",
+    response_model=MicrodataFullReportResponse,
+)
+async def v5_microdata_full_report(year: int):
+    """4×3 full-report PNG + per-area summaries."""
+    df, _ = _load_calibrated_or_404(year)
+
+    summaries_raw = calibration_summary(df)
+    summaries_models = {area: _summary_to_model(s) for area, s in summaries_raw.items()}
+    png_bytes = render_full_report(df)
+    png_b64 = base64.b64encode(png_bytes).decode("ascii")
+
+    return MicrodataFullReportResponse(
+        year=year,
+        n_students=len(df),
+        summaries=summaries_models,
+        full_report_png_base64=png_b64,
     )
 
 

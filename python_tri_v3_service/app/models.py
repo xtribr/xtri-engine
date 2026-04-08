@@ -473,3 +473,90 @@ class ResponseValidarSimulado(BaseModel):
     resultados: List[ResultadoComparacao]
     avisos: List[str] = []
     tempo_processamento: float
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — V5 (Microdata Analysis: Phase 8)
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+class MicrodataYearStatus(BaseModel):
+    """Status of a single microdata year — file present, cache state, etc."""
+    year: int
+    csv_path: str
+    csv_exists: bool
+    csv_size_mb: Optional[float] = None
+    csv_mtime: Optional[float] = None
+    cache_raw_present: bool
+    cache_calibrated_present: bool
+    n_sample: Optional[int] = None
+
+
+class MicrodataAvailabilityResponse(BaseModel):
+    """List of years that have a microdata CSV on disk."""
+    anos: List[int]
+    microdata_dir: str
+
+
+class MicrodataPrepareRequest(BaseModel):
+    """Request body for kicking off the load + calibrate pipeline."""
+    year: int
+    sample_size: int = 200_000
+    rng_seed: int = 42
+    force_rerun: bool = False  # if True, ignore existing cache and re-run
+
+
+class MicrodataPrepareResponse(BaseModel):
+    """Returned immediately by /api/v5/microdata/prepare."""
+    job_id: str
+    status: str  # queued | running | done | error
+    message: Optional[str] = None
+
+
+class MicrodataJobStatusResponse(BaseModel):
+    """Polled by the frontend to track pipeline progress."""
+    job_id: str
+    status: str  # queued | running | done | error
+    progress: float = 0.0  # 0.0..1.0
+    stage: Optional[str] = None
+    started_at: Optional[float] = None
+    elapsed_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+class MicrodataDifficultyRow(BaseModel):
+    """One row of the cohort-empirical difficulty table for a single area."""
+    acertos: int
+    freq: int
+    tri_min: float
+    tri_med: float
+    tri_max: float
+
+
+class MicrodataAreaSummary(BaseModel):
+    """Per-area calibration summary (V3 Local vs official INEP)."""
+    n: int
+    correlation: Optional[float] = None
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+    mean_v3: Optional[float] = None
+    mean_ref: Optional[float] = None
+    mean_shift: Optional[float] = None
+
+
+class MicrodataAreaDashboardResponse(BaseModel):
+    """Single-area dashboard: 1×3 PNG + summary + difficulty table."""
+    year: int
+    area: str
+    n_students: int
+    summary: MicrodataAreaSummary
+    dashboard_png_base64: str
+    difficulty_table: List[MicrodataDifficultyRow]
+
+
+class MicrodataFullReportResponse(BaseModel):
+    """4×3 full report PNG + per-area summaries."""
+    year: int
+    n_students: int
+    summaries: Dict[str, MicrodataAreaSummary]
+    full_report_png_base64: str

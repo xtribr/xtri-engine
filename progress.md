@@ -1,6 +1,6 @@
 # Session Progress
 
-## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2+P3+P4 done, dashboards rendering 4×3 PNGs in ~3s; P5 pending = backend `/api/v5/microdata/*` routes)
+## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2+P3+P4+P5 done, 6 v5 endpoints live behind FastAPI; P6 pending = `/microdata` frontend page)
 
 ## Prior Phase: Phase 7 — Native macOS App (Tier 1 MVN, **steps 1–12 complete**, optional step 13 = clean rebuild via `briefcase create macOS`)
 
@@ -66,6 +66,8 @@
 | 2026-04-08 | P4: app/microdata/dashboards.py — server-side matplotlib PNG generator (Agg backend) | 12 unit tests, 169 total green |
 | 2026-04-08 | Smoke test rendering 9 PNGs from real 200K calibrated sample | ✓ Full 4×3 report 415 KB in 3.4s, per-area dashboards 105-118 KB each in <1s, layout matches mente_mat_resultados.png |
 | 2026-04-08 | matplotlib>=3.7.0 added to pyproject.toml (installed in dev venv: 3.10.8) | +60-100 MB to .app bundle on next rebuild |
+| 2026-04-08 | P5: 6 new /api/v5/microdata/* FastAPI routes + jobs.py + 9 new Pydantic models | 10 new TestClient tests, 179 total green |
+| 2026-04-08 | TestClient real-data validation: GET /api/v5/microdata/dashboard/2024?area=MT against cached parquet | ✓ HTTP 200, base64 PNG decodes correctly, summary correlation > 0.85 |
 
 ## Files Created/Modified
 
