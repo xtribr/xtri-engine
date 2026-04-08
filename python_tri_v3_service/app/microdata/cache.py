@@ -42,17 +42,21 @@ class CacheKey:
     """Stable identifier for a cache entry.
 
     Combines a source-file identity (``source_hash``) with a filter-config
-    identity (``filters_hash``) so the same source + different filters live
-    side-by-side.
+    identity (``filters_hash``) and a processing stage. The stage lets
+    downstream phases (e.g. Phase 3 calibration) cache their output
+    independently from the raw-sample cache without collision.
     """
 
     year: int
     source_hash: str  # hex, first 16 chars
     filters_hash: str  # hex, first 8 chars
+    stage: str = "raw"  # "raw" for the filtered sample, "calibrated" for V3 results, etc.
 
     @property
     def stem(self) -> str:
-        return f"{self.source_hash}_{self.filters_hash}"
+        if self.stage == "raw":
+            return f"{self.source_hash}_{self.filters_hash}"
+        return f"{self.source_hash}_{self.filters_hash}_{self.stage}"
 
     @property
     def parquet_path(self) -> Path:
@@ -61,6 +65,15 @@ class CacheKey:
     @property
     def meta_path(self) -> Path:
         return CACHE_ROOT / str(self.year) / f"{self.stem}.meta.json"
+
+    def with_stage(self, stage: str) -> "CacheKey":
+        """Return a sibling key for a different processing stage."""
+        return CacheKey(
+            year=self.year,
+            source_hash=self.source_hash,
+            filters_hash=self.filters_hash,
+            stage=stage,
+        )
 
 
 @dataclass(frozen=True)

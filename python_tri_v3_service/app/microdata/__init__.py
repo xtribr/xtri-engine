@@ -11,7 +11,19 @@ Public surface:
 See Phase 7 notes in task_plan.md for the phased implementation plan.
 """
 
+from app.microdata.calibration import (
+    calibrate_all_areas,
+    calibrate_area_group,
+    calibration_summary,
+)
 from app.microdata.loader import load_microdata
 from app.microdata.schema import MicrodataSchema, detect_schema
 
-__all__ = ["load_microdata", "MicrodataSchema", "detect_schema"]
+__all__ = [
+    "load_microdata",
+    "MicrodataSchema",
+    "detect_schema",
+    "calibrate_all_areas",
+    "calibrate_area_group",
+    "calibration_summary",
+]

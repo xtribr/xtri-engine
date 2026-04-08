@@ -1,6 +1,6 @@
 # Session Progress
 
-## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2 done, smoke-tested on real 1.6 GB 2024 microdata; P3 pending = V3 Local calibration on sample)
+## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2+P3 done, smoke-tested end-to-end on real 200K sample; P4 pending = matplotlib dashboard generator)
 
 ## Prior Phase: Phase 7 — Native macOS App (Tier 1 MVN, **steps 1–12 complete**, optional step 13 = clean rebuild via `briefcase create macOS`)
 
@@ -59,6 +59,10 @@
 | 2026-04-08 | Finding: `IN_TREINEIRO` removed from 2024+ microdata → loose filter removed, strict-only via Supabase whitelist | Per user "skip IN_TREINEIRO, never use it" |
 | 2026-04-08 | Finding: `NO_ENTIDADE` removed from 2024+ microdata → school names via Supabase `inep_escolas` (27,328 rows, codigo_inep → nome/uf/dependencia/localizacao) | Ready for Phase 7 drill-down join |
 | 2026-04-08 | Added `load_primeira_aplicacao_provas(year)` helper that queries Supabase `enem_codigos_prova` for the strict whitelist | Reuses existing supabase_client infra |
+| 2026-04-08 | P3: app/microdata/calibration.py — V3 Local pipeline grouped by (area, co_prova, tp_lingua) | 18 unit tests, 157 total green |
+| 2026-04-08 | Finding: INEP 2024 LC `TX_GABARITO_LC` is 50 chars (5 EN + 5 ES + 40 common), `TX_RESPOSTAS_LC` is 45 chars | Added `_effective_lc_gabarito` to slice per TP_LINGUA |
+| 2026-04-08 | Finding: cientifico.py `_neg_log_lik_item` has Python loop over students → O(N×K) per L-BFGS iter, makes 200K calibration take >1 hour | Added `calibrar_itens_fast` with O(K) likelihood collapsed via (n_correct, n_wrong) counts; verified mathematically equivalent |
+| 2026-04-08 | Smoke test on real 200K calibrated sample after both vectorizations | ✓ 51.3s total, LC r=0.9495, CH r=0.9711, CN r=0.9300, MT r=0.9489 vs official INEP, 99.8% coverage |
 
 ## Files Created/Modified
 

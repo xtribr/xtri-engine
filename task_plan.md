@@ -186,6 +186,26 @@ Two features described in the user's April 8 request (shared alongside `mente_ma
   - `NO_ENTIDADE` (school name) is also **not in 2024+ microdata** — only `CO_ESCOLA` (numeric). User has the `inep_escolas` Supabase table (27,328 rows) with `codigo_inep → nome, uf, dependencia, localizacao` which covers this for Phase 7 drill-down.
 - New helper: `load_primeira_aplicacao_provas(year, area=None)` in `loader.py` queries Supabase `enem_codigos_prova` for the whitelist (reuses the pattern from `calcular_transformacao.load_item_bank`).
 
+**Phase 8 P3 complete (2026-04-08, commit pending)**:
+
+- `python_tri_v3_service/app/microdata/calibration.py` — V3 Local calibration pipeline for the sample. Groups by `(area, co_prova [, tp_lingua])`, calibrates items per group, estimates per-student theta + nota, anchors via cohort method, joins with `nota_ref_*` from microdata.
+- **Two LC-specific findings**:
+  - INEP 2024 LC `TX_GABARITO_LC` is **50 chars** (5 English + 5 Spanish + 40 common), but `TX_RESPOSTAS_LC` is **45 chars** (one language + common). Added `_effective_lc_gabarito(full_gab, tp_lingua)` that slices the 50-char gabarito to the student's effective 45-char key. Tests for both English (TP_LINGUA=0) and Spanish (TP_LINGUA=1) layouts.
+  - Per-area grouping for LC must include `TP_LINGUA` (not just `CO_PROVA_LC`) because English and Spanish students received different first-5 items even within the same prova color.
+- **Two performance optimizations** (made smoke test 70-100x faster):
+  - `calibrar_itens_fast` (in `calibration.py`, NOT touching `cientifico.py`): original `_neg_log_lik_item` looped Python-level over every student per likelihood eval (O(N×K)). Insight: the marginal log-likelihood for one item only depends on `(n_correct, n_wrong)` counts, so it collapses to `n_correct·log(marg_correct) + n_wrong·log(marg_wrong)` — **O(K)**. Mathematically equivalent.
+  - `eap_theta_batch` (in `calibration.py`): original `eap_theta` was per-student. Replaced with one matmul `(N students, J items) @ (J items, K quad) = (N, K)` for all students at once.
+  - Both are unit-tested to match the scalar versions within 1e-4 / 0.05 tolerance.
+- **Smoke test on real 200K sample**: 51.3s total (LC 13s, CH 12s, CN 13s, MT 13s). Down from a >1 hour estimate with the original loops.
+- **Calibration accuracy** (V3 Local cohort-anchored vs official INEP NU_NOTA_*):
+  - LC: r=0.9495, MAE=43.5, RMSE=57.7
+  - CH: r=0.9711, MAE=43.7, RMSE=55.5
+  - CN: r=0.9300, MAE=35.3, RMSE=42.5
+  - MT: r=0.9489, MAE=37.1, RMSE=46.7
+  - Coverage: 199,585/200,000 (99.8%) — the 0.2% missing are from sub-500-student reaplicação groups.
+- 18 new unit tests (`test_microdata_calibration.py`), all passing. Full suite 157 green.
+- Calibrated parquet cache: 36.6 MB at `~/Library/Application Support/XTRI Engine/microdata_cache/2024/<src>_<filt>_calibrated.parquet`. Reload in 0.08s.
+
 **Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)
