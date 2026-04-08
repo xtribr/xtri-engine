@@ -20,6 +20,9 @@ dependencies = [
     "openpyxl>=3.1.0",
     "supabase>=2.4.0",
     "python-dotenv>=1.0.0",
+    # Phase 7 P2: Parquet cache for microdata analysis. pandas uses pyarrow
+    # automatically for read_parquet/to_parquet. Adds ~50 MB to bundle.
+    "pyarrow>=14.0.0",
 ]
 
 [tool.setuptools.packages.find]

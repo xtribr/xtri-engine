@@ -815,31 +815,45 @@ function drawAnchorChart(students){
 
 // ── Reference Table (ENEM-style difficulty table) ──
 function renderRefTable(students){
-  const refArr=resultData.referencia;
-  if(!refArr||!refArr.length)return;
-
-  // Count frequency per acertos
-  const freq={};
-  students.forEach(s=>{freq[s.acertos]=(freq[s.acertos]||0)+1});
-  // Nota stats per acertos
+  // COHORT-EMPIRICAL table: only acertos counts that have students in THIS cohort,
+  // and Min/Med/Max are computed from the cohort's actual notas (not from the
+  // INEP reference table). This makes the table a faithful summary of what we
+  // computed from the data we have, with zero "phantom" rows from the official
+  // table that nobody in the cohort actually achieved.
   const notasByAc={};
-  students.forEach(s=>{if(!notasByAc[s.acertos])notasByAc[s.acertos]=[];notasByAc[s.acertos].push(s.nota)});
-
-  const maxFreq=Math.max(...Object.values(freq),1);
-  const maxAc=refArr[refArr.length-1].acertos;
-
-  // Split into 3 columns (0-15, 16-30, 31-45) like the PDF
-  const cols=[[],[],[]];
-  refArr.forEach(p=>{
-    if(p.acertos<=15)cols[0].push(p);
-    else if(p.acertos<=30)cols[1].push(p);
-    else cols[2].push(p);
+  students.forEach(s=>{
+    if(s.nota==null||s.nota<=0)return;
+    if(!notasByAc[s.acertos])notasByAc[s.acertos]=[];
+    notasByAc[s.acertos].push(s.nota);
   });
+
+  // Build sorted list of acertos that exist in cohort
+  const acertosPresent=Object.keys(notasByAc).map(Number).sort((a,b)=>a-b);
+  if(acertosPresent.length===0){$('#refTableCard').style.display='none';return;}
+
+  // Per-acertos cohort stats
+  const median=arr=>{const s=[...arr].sort((a,b)=>a-b);const m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2};
+  const rows=acertosPresent.map(ac=>{
+    const notas=notasByAc[ac];
+    return {
+      acertos:ac,
+      freq:notas.length,
+      min:Math.min(...notas),
+      med:median(notas),
+      max:Math.max(...notas),
+    };
+  });
+
+  const maxFreq=Math.max(...rows.map(r=>r.freq),1);
+
+  // Split into 3 columns (low / mid / high acertos within whatever exists)
+  const third=Math.ceil(rows.length/3);
+  const cols=[rows.slice(0,third),rows.slice(third,third*2),rows.slice(third*2)];
   const maxRows=Math.max(cols[0].length,cols[1].length,cols[2].length);
 
-  // Header
+  // Header (no more "Nota Sim" column — Med IS the cohort-empirical median)
   const hdr='<tr>'+['','',''].map(()=>
-    '<th>Ac</th><th>Freq</th><th>Min</th><th>Med</th><th>Max</th><th>Nota Sim</th>'
+    '<th>Ac</th><th>Freq</th><th>Min</th><th>Med</th><th>Max</th>'
   ).join('<th style="width:8px;background:#388e3c"></th>')+'</tr>';
   $('#refThead').innerHTML=hdr;
 
@@ -849,26 +863,14 @@ function renderRefTable(students){
     tbody+='<tr>';
     for(let c=0;c<3;c++){
       if(c>0)tbody+='<td style="background:#e8f5e9;width:8px"></td>';
-      const p=cols[c][i];
-      if(!p){tbody+='<td></td><td></td><td></td><td></td><td></td><td></td>';continue}
-      const ac=p.acertos;
-      const f=freq[ac]||0;
-      const barW=Math.round(f/maxFreq*60);
-      // Nota simulado: mean of students with this acertos count
-      let notaCell='—';
-      if(notasByAc[ac]&&notasByAc[ac].length>0){
-        const mn=Math.min(...notasByAc[ac]), mx=Math.max(...notasByAc[ac]);
-        const avg2=(notasByAc[ac].reduce((a,b)=>a+b,0)/notasByAc[ac].length);
-        // Color: green if within [min,max], red if outside
-        const inBand=avg2>=p.tri_min-0.5&&avg2<=p.tri_max+0.5;
-        const clr=inBand?'#2e7d32':'#c62828';
-        if(mn===mx) notaCell=`<span style="color:${clr};font-weight:600">${avg2.toFixed(1)}</span>`;
-        else notaCell=`<span style="color:${clr};font-weight:600">${avg2.toFixed(1)}</span> <span style="color:#888;font-size:.7rem">(${mn.toFixed(0)}-${mx.toFixed(0)})</span>`;
-      }
-      tbody+=`<td style="text-align:center;font-weight:600">${ac}</td>`;
-      tbody+=`<td><span class="freq-bar" style="width:${barW}px"></span>${f}</td>`;
-      tbody+=`<td>${p.tri_min}</td><td style="font-weight:600">${p.tri_med}</td><td>${p.tri_max}</td>`;
-      tbody+=`<td>${notaCell}</td>`;
+      const r=cols[c][i];
+      if(!r){tbody+='<td></td><td></td><td></td><td></td><td></td>';continue}
+      const barW=Math.round(r.freq/maxFreq*60);
+      tbody+=`<td style="text-align:center;font-weight:600">${r.acertos}</td>`;
+      tbody+=`<td><span class="freq-bar" style="width:${barW}px"></span>${r.freq}</td>`;
+      tbody+=`<td>${r.min.toFixed(1)}</td>`;
+      tbody+=`<td style="font-weight:600">${r.med.toFixed(1)}</td>`;
+      tbody+=`<td>${r.max.toFixed(1)}</td>`;
     }
     tbody+='</tr>';
   }

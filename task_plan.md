@@ -155,6 +155,37 @@ Backend delivered. UX layers deferred to Phase 7 (native app absorbs the fronten
 12. [x] `cp -r` (via `ditto`, more macOS-correct) to `/Applications/XTRI Engine.app` AND `~/Desktop/XTRI Engine.app` (Desktop staging copy for AirDrop to home Mac mini M4). Both 353 MB, ad-hoc signed, identifier `com.gabaritai.xtri-engine`. The `.icns` icon survived the rebuild via manual swap (Briefcase 0.4 only copies icons during `create`, not on subsequent `build` runs — known quirk).
 13. [ ] **Optional cleanup**: `briefcase create macOS` for a clean from-scratch rebuild that doesn't depend on the manual icon swap surviving across rebuilds.
 
+### Phase 8 — MICRODATA Analysis + Drill-down Navigator + Claude Reports [in_progress]
+
+Two features described in the user's April 8 request (shared alongside `mente_mat_resultados.png` and `ENEM 2024 - dificuldades.pdf`):
+
+**Feature A** — New third section that ingests the full ENEM microdata CSV (~1.6 GB), filters valid first-application students, samples 100-200K, runs V3 Local calibration, and renders per-area dashboards (scatter V3 vs reference, histogram, acertos-vs-nota) matching the reference PNG.
+
+**Feature B** — Drill-down UI navigator by UF → City → School → Student with Claude API integration for natural-language reports at each level. School names resolved via the user's Supabase `inep_escolas` table (27,328 schools, keyed on `codigo_inep = CO_ESCOLA`).
+
+**Phased plan** (9 sub-phases, ~13-14 sessions total). See full plan in the earlier `/plan` output. Condensed:
+
+- P1 — Microdata loader module
+- P2 — Parquet cache layer
+- P3 — Sample V3 Local calibration pipeline
+- P4 — matplotlib dashboard generator (+matplotlib dep, ~60 MB bundle growth)
+- P5 — Backend `/api/v5/microdata/*` routes
+- P6 — Frontend `/microdata` page
+- P7 — Drill-down data API (`/api/v5/drilldown/*`, joins with `inep_escolas`)
+- P8 — Frontend `/drilldown` navigator
+- P9 — Claude API reports integration (raw httpx, no anthropic SDK dep)
+
+**Phase 8 P1 + P2 complete (2026-04-08, commit pending)**:
+
+- `python_tri_v3_service/app/microdata/` package created with 5 modules (`__init__.py`, `schema.py`, `filters.py`, `loader.py`, `cache.py`)
+- **Smoke-tested against real 1.6 GB MICRODADOS_ENEM_2024.csv**: streams + filters + samples in 36.6s, returns 200K rows. Cache writes to 24 MB parquet in 0.3s, reloads in 0.08s (457x speedup over cold). 4,332,944 total rows read, 2,856,647 survived valid-student filter (65.9%). Area maxes match the 2024 PDF exactly (LC 795.8, CH 819.7, CN 867.2, MT 961.9).
+- `pyarrow>=14.0.0` added to `python_tri_v3_service/pyproject.toml` for Parquet I/O. Installed wheel is 34 MB (smaller than the 50 MB estimate).
+- 20 unit tests added in `tests/test_microdata_loader.py`, all passing. Full suite still 139 green.
+- **Two real-world findings from the smoke test**:
+  - `IN_TREINEIRO` is **not in 2024+ microdata** (INEP removed it along with `TP_SEXO`, `NU_IDADE`, etc). User confirmed: skip IN_TREINEIRO entirely. The loose primeira-aplicação fallback was removed — `is_primeira_aplicacao(provas_primeira=None)` now explicitly logs a warning and returns all-True (no filter). Strict mode via Supabase whitelist is the only reliable filter for 2024+.
+  - `NO_ENTIDADE` (school name) is also **not in 2024+ microdata** — only `CO_ESCOLA` (numeric). User has the `inep_escolas` Supabase table (27,328 rows) with `codigo_inep → nome, uf, dependencia, localizacao` which covers this for Phase 7 drill-down.
+- New helper: `load_primeira_aplicacao_provas(year, area=None)` in `loader.py` queries Supabase `enem_codigos_prova` for the whitelist (reuses the pattern from `calcular_transformacao.load_item_bank`).
+
 **Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)

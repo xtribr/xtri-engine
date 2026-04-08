@@ -1,0 +1,17 @@
+"""
+Microdata analysis package — streams the official ENEM microdata CSV from INEP,
+filters to valid first-application students, random-samples, calibrates via
+V3 Local, and generates per-area validation dashboards.
+
+Public surface:
+    from app.microdata import load_microdata, MicrodataSchema
+    from app.microdata.cache import load_cached, save_cached, cache_key
+    from app.microdata.filters import is_valid_student, is_primeira_aplicacao
+
+See Phase 7 notes in task_plan.md for the phased implementation plan.
+"""
+
+from app.microdata.loader import load_microdata
+from app.microdata.schema import MicrodataSchema, detect_schema
+
+__all__ = ["load_microdata", "MicrodataSchema", "detect_schema"]

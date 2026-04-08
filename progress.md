@@ -1,6 +1,8 @@
 # Session Progress
 
-## Current Phase: Phase 7 — Native macOS App (Tier 1 MVN, **steps 1–12 complete**, optional step 13 = clean rebuild via `briefcase create macOS`)
+## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2 done, smoke-tested on real 1.6 GB 2024 microdata; P3 pending = V3 Local calibration on sample)
+
+## Prior Phase: Phase 7 — Native macOS App (Tier 1 MVN, **steps 1–12 complete**, optional step 13 = clean rebuild via `briefcase create macOS`)
 
 **Progress**: Steps 1–12 complete end-to-end. `XTRI Engine.app` exists in three places (build dir, `/Applications/`, `~/Desktop/`), each 353 MB, arm64-thin, ad-hoc signed, identifier `com.gabaritai.xtri-engine`. Runs cleanly: launch → port 5003 bound by main process → /health 200 → WebView with X-TRI logo in Dock and header. `app.py` runs uvicorn in a worker thread (NOT subprocess — Briefcase GUI-Stub is not a real Python interpreter). 2024 reference scale ingested into JSON, constants updated to round-down PDF values. V3 Local validated end-to-end via LC.txt smoke test. Slider math fixed (shift/scale apply post-z-score for Cohort-Anchored, post-percentile for Percentil). UI layout fixes for dropdown overflow + chart x-axis label collision. 119 tests passing.
 
@@ -52,6 +54,11 @@
 | 2026-04-07 | Chart x-axis "Numero de Acertos" colliding with footer credit | ✗ Both rendered at y=531/532, 1px apart |
 | 2026-04-07 | Chart fix: bump `pad.bottom` 55→90, reposition both labels relative to plot bottom | ✓ ~22px gap, no overlap |
 | 2026-04-07 | `ditto` to `/Applications/XTRI Engine.app` AND `~/Desktop/XTRI Engine.app` | ✓ Both 353 MB, X-TRI logo, ad-hoc signed |
+| 2026-04-08 | Phase 8 P1-P2: microdata loader + Parquet cache package | ✓ 20 unit tests, 139 total green |
+| 2026-04-08 | Smoke test on real 1.6 GB MICRODADOS_ENEM_2024.csv | ✓ 36.6s cold stream (4.3M rows → 2.86M valid → 200K sample), 24 MB parquet, 0.08s reload |
+| 2026-04-08 | Finding: `IN_TREINEIRO` removed from 2024+ microdata → loose filter removed, strict-only via Supabase whitelist | Per user "skip IN_TREINEIRO, never use it" |
+| 2026-04-08 | Finding: `NO_ENTIDADE` removed from 2024+ microdata → school names via Supabase `inep_escolas` (27,328 rows, codigo_inep → nome/uf/dependencia/localizacao) | Ready for Phase 7 drill-down join |
+| 2026-04-08 | Added `load_primeira_aplicacao_provas(year)` helper that queries Supabase `enem_codigos_prova` for the strict whitelist | Reuses existing supabase_client infra |
 
 ## Files Created/Modified
 

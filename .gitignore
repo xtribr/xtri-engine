@@ -11,3 +11,7 @@ htmlcov/
 dist/
 build/
 .claude/
+
+# Phase 8: user drops the 1.6 GB MICRODADOS_ENEM_<year>.csv files here.
+# Root-scoped (/microdata/) so it does NOT match python_tri_v3_service/app/microdata/.
+/microdata/
