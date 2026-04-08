@@ -23,6 +23,10 @@ dependencies = [
     # Phase 7 P2: Parquet cache for microdata analysis. pandas uses pyarrow
     # automatically for read_parquet/to_parquet. Adds ~50 MB to bundle.
     "pyarrow>=14.0.0",
+    # Phase 8 P4: server-side dashboard PNG rendering for the microdata
+    # validation reports. Always use matplotlib.use('Agg') before importing
+    # pyplot — there is no GUI backend in the FastAPI worker thread.
+    "matplotlib>=3.7.0",
 ]
 
 [tool.setuptools.packages.find]

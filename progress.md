@@ -1,6 +1,6 @@
 # Session Progress
 
-## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2+P3 done, smoke-tested end-to-end on real 200K sample; P4 pending = matplotlib dashboard generator)
+## Current Phase: Phase 8 — MICRODATA Analysis + Drill-down (P1+P2+P3+P4 done, dashboards rendering 4×3 PNGs in ~3s; P5 pending = backend `/api/v5/microdata/*` routes)
 
 ## Prior Phase: Phase 7 — Native macOS App (Tier 1 MVN, **steps 1–12 complete**, optional step 13 = clean rebuild via `briefcase create macOS`)
 
@@ -63,6 +63,9 @@
 | 2026-04-08 | Finding: INEP 2024 LC `TX_GABARITO_LC` is 50 chars (5 EN + 5 ES + 40 common), `TX_RESPOSTAS_LC` is 45 chars | Added `_effective_lc_gabarito` to slice per TP_LINGUA |
 | 2026-04-08 | Finding: cientifico.py `_neg_log_lik_item` has Python loop over students → O(N×K) per L-BFGS iter, makes 200K calibration take >1 hour | Added `calibrar_itens_fast` with O(K) likelihood collapsed via (n_correct, n_wrong) counts; verified mathematically equivalent |
 | 2026-04-08 | Smoke test on real 200K calibrated sample after both vectorizations | ✓ 51.3s total, LC r=0.9495, CH r=0.9711, CN r=0.9300, MT r=0.9489 vs official INEP, 99.8% coverage |
+| 2026-04-08 | P4: app/microdata/dashboards.py — server-side matplotlib PNG generator (Agg backend) | 12 unit tests, 169 total green |
+| 2026-04-08 | Smoke test rendering 9 PNGs from real 200K calibrated sample | ✓ Full 4×3 report 415 KB in 3.4s, per-area dashboards 105-118 KB each in <1s, layout matches mente_mat_resultados.png |
+| 2026-04-08 | matplotlib>=3.7.0 added to pyproject.toml (installed in dev venv: 3.10.8) | +60-100 MB to .app bundle on next rebuild |
 
 ## Files Created/Modified
 

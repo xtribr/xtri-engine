@@ -206,6 +206,21 @@ Two features described in the user's April 8 request (shared alongside `mente_ma
 - 18 new unit tests (`test_microdata_calibration.py`), all passing. Full suite 157 green.
 - Calibrated parquet cache: 36.6 MB at `~/Library/Application Support/XTRI Engine/microdata_cache/2024/<src>_<filt>_calibrated.parquet`. Reload in 0.08s.
 
+**Phase 8 P4 complete (2026-04-08, commit pending)**:
+
+- `python_tri_v3_service/app/microdata/dashboards.py` — server-side matplotlib PNG generator. `matplotlib.use('Agg')` set at module-import time before any pyplot import (FastAPI worker threads have no GUI backend).
+- Public functions: `render_area_dashboard(df, area)` (1×3 PNG per area), `render_full_report(df)` (4×3 PNG matching the user's `mente_mat_resultados.png` reference layout), `render_difficulty_table_png(df, area)`, `compute_difficulty_table(df, area)` (data-only, used by frontend).
+- Per-area color palette matching V3 conventions: LC purple, CH green, CN blue, MT orange.
+- `matplotlib>=3.7.0` added to xtri-service deps. Installed wheel is matplotlib 3.10.8 + dependencies (contourpy, cycler, kiwisolver, pillow, fonttools). +60-100 MB to .app bundle on next rebuild.
+- 12 new unit tests covering valid PNG bytes (PNG magic header check), per-area rendering, full report, difficulty table, empty-data graceful handling, palette completeness. Full suite 169 green.
+- **Smoke test on real 200K calibrated sample**:
+  - Full report (4×3 PNG, 4 areas): **3.4s**, 415 KB
+  - Per-area dashboards: 0.7-1.1s each, 105-118 KB
+  - Difficulty tables: <0.5s each, 100-109 KB
+  - Total render time for all 9 PNGs: ~7s
+  - Output saved to `/tmp/microdata_dashboards/` for inspection
+  - Visual: matches the user's reference image structure exactly. Correlations from the calibration are visible in scatter titles (LC r=0.950, CH r=0.971, CN r=0.930, MT r=0.949).
+
 **Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)

@@ -16,6 +16,12 @@ from app.microdata.calibration import (
     calibrate_area_group,
     calibration_summary,
 )
+from app.microdata.dashboards import (
+    compute_difficulty_table,
+    render_area_dashboard,
+    render_difficulty_table_png,
+    render_full_report,
+)
 from app.microdata.loader import load_microdata
 from app.microdata.schema import MicrodataSchema, detect_schema
 
@@ -26,4 +32,8 @@ __all__ = [
     "calibrate_all_areas",
     "calibrate_area_group",
     "calibration_summary",
+    "compute_difficulty_table",
+    "render_area_dashboard",
+    "render_full_report",
+    "render_difficulty_table_png",
 ]
