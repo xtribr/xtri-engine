@@ -27,6 +27,11 @@ dependencies = [
     # validation reports. Always use matplotlib.use('Agg') before importing
     # pyplot — there is no GUI backend in the FastAPI worker thread.
     "matplotlib>=3.7.0",
+    # Phase 8 P9: Claude-powered narrative report endpoint. Optional at
+    # runtime — the /api/v5/microdata/report/{year} endpoint returns 501
+    # when ANTHROPIC_API_KEY is unset, so the package still imports cleanly
+    # without the key.
+    "anthropic>=0.40.0",
 ]
 
 [tool.setuptools.packages.find]
