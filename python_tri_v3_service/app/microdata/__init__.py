@@ -26,7 +26,14 @@ from app.microdata.dashboards import (
 )
 from app.microdata.excel_export import build_microdata_csv, build_microdata_excel
 from app.microdata.loader import load_microdata
-from app.microdata.report import build_payload, build_prompt, generate_report
+from app.microdata.report import (
+    build_full_payload,
+    build_full_prompt,
+    build_payload,
+    build_prompt,
+    generate_full_report,
+    generate_report,
+)
 from app.microdata.schema import MicrodataSchema, detect_schema
 
 __all__ = [
@@ -44,7 +51,10 @@ __all__ = [
     "build_microdata_csv",
     "compute_dashboard_data",
     "compute_breakdown",
+    "build_full_payload",
+    "build_full_prompt",
     "build_payload",
     "build_prompt",
+    "generate_full_report",
     "generate_report",
 ]

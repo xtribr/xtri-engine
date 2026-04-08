@@ -1309,6 +1309,7 @@ from .microdata import (  # noqa: PLC0415
     compute_dashboard_data,
     compute_difficulty_table,
     detect_schema,
+    generate_full_report,
     generate_report,
     load_microdata,
     render_area_dashboard,
@@ -1695,6 +1696,36 @@ async def v5_microdata_report(year: int, area: str):
     return result
 
 
+@app.post("/api/v5/microdata/report/{year}/full")
+async def v5_microdata_report_full(year: int):
+    """Generate a single Claude narrative covering all four ENEM areas.
+
+    Builds payloads for LC, CH, CN and MT simultaneously, then sends one
+    comprehensive prompt to Claude Opus requesting a comparative analysis.
+    Expect 30–90 s of processing time.  Returns ``501`` when the API key is
+    missing, ``502`` on API failure.
+    """
+    df, _ = _load_calibrated_or_404(year)
+
+    try:
+        result = generate_full_report(df, year)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="anthropic package not installed in this build",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging  # noqa: PLC0415
+        _logging.getLogger(__name__).exception("Full AI report generation failed")
+        raise HTTPException(
+            status_code=502, detail=f"Claude API call failed: {exc}"
+        ) from exc
+
+    return result
+
+
 @app.get("/api/v5/microdata/export-excel/{year}")
 async def v5_microdata_export_excel(year: int, include_students: bool = False):
     """Stream the multi-sheet Excel report for one ENEM year.
@@ -2004,22 +2035,29 @@ async def exportar_excel(payload: Dict[str, Any] = Body(...)):
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
 
 
+_NO_CACHE_HEADERS = {
+    "Cache-Control": "no-cache, no-store, must-revalidate",
+    "Pragma": "no-cache",
+    "Expires": "0",
+}
+
+
 @app.get("/", include_in_schema=False)
 async def frontend():
     """Serve the frontend application."""
-    return FileResponse(os.path.join(_static_dir, "index.html"))
+    return FileResponse(os.path.join(_static_dir, "index.html"), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/validator", include_in_schema=False)
 async def frontend_validator():
     """Serve the INEP validator page."""
-    return FileResponse(os.path.join(_static_dir, "validator.html"))
+    return FileResponse(os.path.join(_static_dir, "validator.html"), headers=_NO_CACHE_HEADERS)
 
 
 @app.get("/microdata", include_in_schema=False)
 async def frontend_microdata():
     """Serve the microdata analysis page (Phase 8)."""
-    return FileResponse(os.path.join(_static_dir, "microdata.html"))
+    return FileResponse(os.path.join(_static_dir, "microdata.html"), headers=_NO_CACHE_HEADERS)
 
 
 if os.path.isdir(_static_dir):

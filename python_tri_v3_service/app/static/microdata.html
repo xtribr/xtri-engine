@@ -118,6 +118,9 @@ table.drill tbody tr:hover{background:#e8f0fe}
 .modal-foot .download{background:#1e3c72;color:#fff}
 .modal-foot .close{background:#ddd;color:#333}
 .modal-body .loading{color:#888;font-style:italic;text-align:center;padding:2rem 0}
+.report-charts{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.report-charts .chart-box{background:#f8f9fa;border-radius:8px;padding:8px;min-height:200px}
+.report-charts .chart-full{grid-column:1/-1;background:#f8f9fa;border-radius:8px;padding:8px}
 .results{display:none}
 .results.active{display:block}
 footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
@@ -213,7 +216,10 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
         <span class="chip" id="drillCount">—</span>
 
         <button class="btn btn-ai" id="btnReport" style="margin-left:auto" disabled>
-          Gerar relatório IA (Claude)
+          Relatório IA — esta área
+        </button>
+        <button class="btn btn-ai" id="btnReportFull" style="margin-left:8px;background:#1a6b3c" disabled>
+          Relatório Completo (4 Áreas)
         </button>
       </div>
 
@@ -241,6 +247,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
     <div class="modal-foot">
       <div class="meta" id="reportMeta">—</div>
       <button class="download" id="reportDownload" disabled>Baixar .md</button>
+      <button class="download" id="reportDownloadHtml" disabled style="background:#1a6b3c">Baixar HTML (WordPress)</button>
       <button class="close" id="reportCloseFoot">Fechar</button>
     </div>
   </div>
@@ -356,6 +363,7 @@ $("#btnAnalisar").addEventListener("click", async () => {
         $("#btnExcel").disabled = false;
         $("#btnCsv").disabled = false;
         $("#btnReport").disabled = false;
+        $("#btnReportFull").disabled = false;
       } else if (job.status === "error") {
         clearInterval(pollInterval);
         showError(job.error || "Erro desconhecido");
@@ -875,6 +883,178 @@ function renderInline(s) {
   return out;
 }
 
+// ── Report chart rendering ────────────────────────────────────────────────
+
+function renderReportCharts(data) {
+  const wrap = document.getElementById("reportCharts");
+  if (!wrap) return;
+  if (data.area === "ALL") {
+    _renderFullCharts(wrap, data.charts_data);
+  } else {
+    _renderSingleCharts(wrap, data.area, data.charts_data);
+  }
+}
+
+function _renderSingleCharts(wrap, area, cd) {
+  wrap.innerHTML = "";
+  const BLUE = "#2980b9", RED = "#e74c3c", GREEN = "#27ae60";
+
+  // ── TRI difficulty curve (full width) ───────────────────────────────────
+  const triBox = document.createElement("div");
+  triBox.className = "chart-full";
+  wrap.appendChild(triBox);
+  const diff = cd.difficulty || [];
+  const xs = diff.map(r => r.acertos);
+  Plotly.newPlot(triBox, [
+    {x: [...xs, ...xs.slice().reverse()],
+     y: [...diff.map(r => r.tri_max), ...diff.map(r => r.tri_min).reverse()],
+     fill: "toself", fillcolor: "rgba(41,128,185,0.12)", line: {color: "transparent"},
+     showlegend: false, hoverinfo: "none"},
+    {x: xs, y: diff.map(r => r.tri_max), name: "TRI máx",
+     mode: "lines", line: {color: RED, width: 1, dash: "dot"}},
+    {x: xs, y: diff.map(r => r.tri_med), name: "TRI mediana",
+     mode: "lines+markers", line: {color: BLUE, width: 2.5},
+     marker: {size: 4, color: BLUE}},
+    {x: xs, y: diff.map(r => r.tri_min), name: "TRI mín",
+     mode: "lines", line: {color: GREEN, width: 1, dash: "dot"}},
+  ], {
+    title: {text: `Curva de Dificuldade TRI — ${area}`, font: {size: 14}},
+    xaxis: {title: "Acertos na prova", gridcolor: "#eee"},
+    yaxis: {title: "Nota TRI INEP", gridcolor: "#eee"},
+    legend: {orientation: "h", y: -0.2},
+    height: 300, margin: {t: 40, b: 60, l: 60, r: 20},
+    paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+  }, {responsive: true, displayModeBar: false});
+
+  // ── Top UFs bar ─────────────────────────────────────────────────────────
+  if (cd.top_ufs && cd.top_ufs.length > 0) {
+    const ufBox = document.createElement("div");
+    ufBox.className = "chart-box";
+    wrap.appendChild(ufBox);
+    const ufs = [...cd.top_ufs].reverse();
+    Plotly.newPlot(ufBox, [{
+      type: "bar", orientation: "h",
+      x: ufs.map(r => r.median), y: ufs.map(r => r.label),
+      text: ufs.map(r => r.median), textposition: "outside",
+      marker: {color: BLUE},
+    }], {
+      title: {text: `Top Estados — Mediana (${area})`, font: {size: 13}},
+      xaxis: {title: "Mediana INEP", gridcolor: "#eee"},
+      height: Math.max(260, cd.top_ufs.length * 26 + 90),
+      margin: {t: 40, b: 50, l: 55, r: 70},
+      paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+    }, {responsive: true, displayModeBar: false});
+  }
+
+  // ── Top schools bar ──────────────────────────────────────────────────────
+  if (cd.top_escolas && cd.top_escolas.length > 0) {
+    const escBox = document.createElement("div");
+    escBox.className = "chart-box";
+    wrap.appendChild(escBox);
+    const escs = [...cd.top_escolas].reverse();
+    const NET_COLORS = {Federal:"#1e3c72", Estadual:"#27ae60", Municipal:"#f39c12", Privada:"#e74c3c"};
+    Plotly.newPlot(escBox, [{
+      type: "bar", orientation: "h",
+      x: escs.map(r => r.median),
+      y: escs.map(r => (r.municipio || r.label) + " (" + (r.uf || "") + ")"),
+      text: escs.map(r => r.median), textposition: "outside",
+      marker: {color: escs.map(r => NET_COLORS[r.dependencia] || "#999")},
+      customdata: escs.map(r => r.dependencia),
+      hovertemplate: "%{y}<br>Mediana: %{x}<br>Rede: %{customdata}<extra></extra>",
+    }], {
+      title: {text: `Top Escolas (${area})`, font: {size: 13}},
+      xaxis: {title: "Mediana INEP", gridcolor: "#eee"},
+      height: Math.max(260, cd.top_escolas.length * 26 + 90),
+      margin: {t: 40, b: 50, l: 180, r: 70},
+      paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+    }, {responsive: true, displayModeBar: false});
+  }
+}
+
+function _renderFullCharts(wrap, chartsData) {
+  wrap.innerHTML = "";
+  const AREA_COLORS_MAP = {LC:"#9b59b6", CH:"#27ae60", CN:"#3498db", MT:"#e67e22"};
+  const ALL_AREAS = ["LC", "CH", "CN", "MT"];
+
+  // ── Box plots — 4 areas side by side ────────────────────────────────────
+  const boxBox = document.createElement("div");
+  boxBox.className = "chart-full";
+  wrap.appendChild(boxBox);
+  const boxTraces = ALL_AREAS.map(a => {
+    const s = (chartsData[a] || {}).summary || {};
+    return {
+      type: "box", name: a,
+      q1: [s.p25], median: [s.median], q3: [s.p75],
+      lowerfence: [s.min], upperfence: [s.max], mean: [s.mean],
+      boxmean: "sd",
+      marker: {color: AREA_COLORS_MAP[a]},
+    };
+  });
+  Plotly.newPlot(boxBox, boxTraces, {
+    title: {text: "Distribuição de Notas — 4 Áreas (INEP)", font: {size: 14}},
+    yaxis: {title: "Nota INEP", gridcolor: "#eee"},
+    height: 320, margin: {t: 40, b: 40, l: 60, r: 20},
+    paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+  }, {responsive: true, displayModeBar: false});
+
+  // ── TRI curves — 4 lines on one chart ───────────────────────────────────
+  const triBox = document.createElement("div");
+  triBox.className = "chart-full";
+  wrap.appendChild(triBox);
+  const triTraces = ALL_AREAS.map(a => {
+    const diff = (chartsData[a] || {}).difficulty || [];
+    return {
+      x: diff.map(r => r.acertos), y: diff.map(r => r.tri_med),
+      name: a, mode: "lines+markers",
+      line: {color: AREA_COLORS_MAP[a], width: 2},
+      marker: {size: 3},
+    };
+  });
+  Plotly.newPlot(triBox, triTraces, {
+    title: {text: "Curvas de Dificuldade TRI — 4 Áreas", font: {size: 14}},
+    xaxis: {title: "Acertos na prova", gridcolor: "#eee"},
+    yaxis: {title: "Nota TRI Mediana", gridcolor: "#eee"},
+    legend: {orientation: "h", y: -0.2},
+    height: 320, margin: {t: 40, b: 70, l: 60, r: 20},
+    paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+  }, {responsive: true, displayModeBar: false});
+
+  // ── Grouped bar — top UFs common to all areas ────────────────────────────
+  const ufSets = ALL_AREAS.map(a => new Set(((chartsData[a] || {}).top_ufs || []).map(r => r.label)));
+  let commonUfs = [...ufSets[0]].filter(uf => ufSets.every(s => s.has(uf)));
+  if (commonUfs.length === 0) {
+    // Fallback: UFs in any 3+ areas
+    const ufCount = {};
+    ALL_AREAS.forEach(a => ((chartsData[a] || {}).top_ufs || []).forEach(r => {
+      ufCount[r.label] = (ufCount[r.label] || 0) + 1;
+    }));
+    commonUfs = Object.entries(ufCount).filter(([, c]) => c >= 3).map(([uf]) => uf);
+  }
+  if (commonUfs.length > 0) {
+    const ufBox = document.createElement("div");
+    ufBox.className = "chart-full";
+    wrap.appendChild(ufBox);
+    const groupTraces = ALL_AREAS.map(a => ({
+      type: "bar", name: a,
+      x: commonUfs,
+      y: commonUfs.map(uf => {
+        const row = ((chartsData[a] || {}).top_ufs || []).find(r => r.label === uf);
+        return row ? row.median : null;
+      }),
+      marker: {color: AREA_COLORS_MAP[a]},
+    }));
+    Plotly.newPlot(ufBox, groupTraces, {
+      title: {text: "Mediana por Estado (UFs no top-10 de múltiplas áreas)", font: {size: 14}},
+      barmode: "group",
+      xaxis: {title: "Estado"},
+      yaxis: {title: "Mediana INEP", gridcolor: "#eee"},
+      legend: {orientation: "h", y: -0.2},
+      height: 340, margin: {t: 40, b: 80, l: 60, r: 20},
+      paper_bgcolor: "transparent", plot_bgcolor: "#f8f9fa",
+    }, {responsive: true, displayModeBar: false});
+  }
+}
+
 async function openReport() {
   const ano = parseInt($("#ano").value, 10);
   const area = $("#drillArea").value;
@@ -912,12 +1092,66 @@ async function openReport() {
     }
     const data = await r.json();
     lastReport = data;
-    $("#reportBody").innerHTML = renderMarkdown(data.markdown);
+    $("#reportBody").innerHTML =
+      `<div id="reportCharts" class="report-charts"></div>` +
+      renderMarkdown(data.markdown);
+    renderReportCharts(data);
     const tokenInfo = (data.prompt_tokens && data.output_tokens)
       ? ` · in=${data.prompt_tokens} out=${data.output_tokens} tokens`
       : "";
     $("#reportMeta").textContent = `Modelo: ${data.model} · ${elapsed}s${tokenInfo}`;
     $("#reportDownload").disabled = false;
+    $("#reportDownloadHtml").disabled = false;
+  } catch (e) {
+    $("#reportBody").innerHTML = `<h2>Erro</h2><p>${escapeHtml(e.message)}</p>`;
+  }
+}
+
+async function openFullReport() {
+  const ano = parseInt($("#ano").value, 10);
+  if (!ano) return;
+
+  $("#reportTitle").textContent = `Relatório Completo IA — 4 Áreas (${ano})`;
+  $("#reportBody").innerHTML = `<div class="loading">Gerando análise completa com Claude Opus… (pode levar 30–90 s)</div>`;
+  $("#reportMeta").textContent = "Modelo: claude-opus-4-6 · todas as áreas";
+  $("#reportDownload").disabled = true;
+  $("#reportModal").classList.add("active");
+
+  const t0 = Date.now();
+  try {
+    const r = await fetch(`/api/v5/microdata/report/${ano}/full`, {method: "POST"});
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({detail: "Falha"}));
+      if (r.status === 501) {
+        $("#reportBody").innerHTML = `
+          <h2>IA indisponível</h2>
+          <p>O servidor não tem <code>ANTHROPIC_API_KEY</code> configurada.</p>
+          <ol>
+            <li>Adicione <code>ANTHROPIC_API_KEY=sk-ant-…</code> ao arquivo
+              <code>~/Library/Application Support/XTRI Engine/.env</code></li>
+            <li>Ou exporte no shell antes de iniciar o uvicorn</li>
+            <li>Reinicie o servidor</li>
+          </ol>
+          <p><small>Detalhe técnico: ${escapeHtml(err.detail || "")}</small></p>
+        `;
+      } else {
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      return;
+    }
+    const data = await r.json();
+    lastReport = data;
+    $("#reportBody").innerHTML =
+      `<div id="reportCharts" class="report-charts"></div>` +
+      renderMarkdown(data.markdown);
+    renderReportCharts(data);
+    const tokenInfo = (data.prompt_tokens && data.output_tokens)
+      ? ` · in=${data.prompt_tokens} out=${data.output_tokens} tokens`
+      : "";
+    $("#reportMeta").textContent = `Modelo: ${data.model} · ${elapsed}s${tokenInfo}`;
+    $("#reportDownload").disabled = false;
+    $("#reportDownloadHtml").disabled = false;
   } catch (e) {
     $("#reportBody").innerHTML = `<h2>Erro</h2><p>${escapeHtml(e.message)}</p>`;
   }
@@ -928,6 +1162,7 @@ function closeReport() {
 }
 
 $("#btnReport").addEventListener("click", openReport);
+$("#btnReportFull").addEventListener("click", openFullReport);
 $("#reportClose").addEventListener("click", closeReport);
 $("#reportCloseFoot").addEventListener("click", closeReport);
 $("#reportModal").addEventListener("click", e => {
@@ -948,6 +1183,88 @@ $("#reportDownload").addEventListener("click", () => {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+});
+
+$("#reportDownloadHtml").addEventListener("click", async () => {
+  if (!lastReport || !lastReport.markdown) return;
+  const btn = $("#reportDownloadHtml");
+  btn.disabled = true;
+  btn.textContent = "Exportando…";
+
+  // Capture every Plotly chart div as a PNG image
+  const chartDivs = document.querySelectorAll("#reportCharts .chart-box, #reportCharts .chart-full");
+  const chartImgsHtml = [];
+  for (const div of chartDivs) {
+    try {
+      const w = Math.max(div.offsetWidth || 860, 860);
+      const h = Math.max(div.offsetHeight || 320, 200);
+      const dataUrl = await Plotly.toImage(div, {format: "png", width: w, height: h, scale: 2});
+      chartImgsHtml.push(
+        `<figure style="margin:1.5rem 0;text-align:center">` +
+        `<img src="${dataUrl}" style="max-width:100%;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,.12)">` +
+        `</figure>`
+      );
+    } catch (e) { console.warn("chart capture failed", e); }
+  }
+
+  const areaLabel = lastReport.area === "ALL"
+    ? "Análise Completa — 4 Áreas"
+    : `${lastReport.area} — ${({"LC":"Linguagens","CH":"Ciências Humanas","CN":"Ciências da Natureza","MT":"Matemática"})[lastReport.area] || lastReport.area}`;
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Relatório XTRI ENEM ${lastReport.year} — ${areaLabel}</title>
+<style>
+  body{font-family:Georgia,'Times New Roman',serif;max-width:860px;margin:0 auto;padding:2.5rem 1.5rem;color:#222;line-height:1.75;font-size:1.05rem}
+  h1{font-size:1.9rem;color:#1e3c72;border-bottom:3px solid #1e3c72;padding-bottom:.6rem;margin-bottom:.4rem}
+  h2{font-size:1.35rem;color:#1e3c72;margin-top:2.2rem;border-bottom:1px solid #dde}
+  h3{font-size:1.1rem;color:#2c3e50;margin-top:1.6rem}
+  p{margin:.9rem 0}
+  ul,ol{margin:.6rem 0 .9rem 1.6rem}
+  li{margin-bottom:.35rem}
+  table{border-collapse:collapse;width:100%;margin:1.1rem 0;font-size:.92rem}
+  th,td{border:1px solid #ccc;padding:.45rem .7rem;text-align:left}
+  th{background:#f1f4f8;font-weight:700;color:#1e3c72}
+  tr:nth-child(even){background:#fafbfc}
+  code{background:#f1f4f8;padding:.1rem .4rem;border-radius:3px;font-size:.88em;font-family:monospace}
+  strong{color:#1e3c72}
+  .meta{color:#888;font-size:.82rem;font-style:italic;margin-bottom:1.8rem;padding-bottom:.8rem;border-bottom:1px solid #eee}
+  @media(max-width:600px){body{padding:1.2rem .9rem}h1{font-size:1.4rem}}
+</style>
+</head>
+<body>
+<div class="meta">
+  Gerado por <strong>XTRI Engine</strong> — Sistema de Análise de Microdados ENEM &nbsp;|&nbsp;
+  Modelo: ${lastReport.model} &nbsp;|&nbsp; Ano: ${lastReport.year} &nbsp;|&nbsp;
+  ${new Date().toLocaleDateString("pt-BR",{day:"2-digit",month:"long",year:"numeric"})}
+  ${lastReport.prompt_tokens ? `&nbsp;|&nbsp; Tokens: in=${lastReport.prompt_tokens} out=${lastReport.output_tokens}` : ""}
+</div>
+${chartImgsHtml.join("\n")}
+${renderMarkdown(lastReport.markdown)}
+<hr style="margin-top:3rem;border:none;border-top:1px solid #eee">
+<p style="font-size:.78rem;color:#aaa;text-align:center">
+  Análise gerada automaticamente pelo XTRI Engine com base nos microdados oficiais do INEP.
+  Números calculados sobre amostra de ${(lastReport.charts_data?.summary?.n || (lastReport.charts_data?.MT?.summary?.n) || "—").toLocaleString("pt-BR")} estudantes.
+  Relatório produzido por IA — verifique os dados antes de publicar.
+</p>
+</body>
+</html>`;
+
+  const blob = new Blob([html], {type: "text/html;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `xtri_relatorio_${lastReport.year}_${lastReport.area}.html`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  btn.textContent = "Baixar HTML (WordPress)";
+  btn.disabled = false;
 });
 
 // Bootstrap
