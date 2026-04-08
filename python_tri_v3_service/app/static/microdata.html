@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XTRI — Análise de Microdados ENEM (INEP)</title>
+<link rel="icon" href="/static/logotipo.png">
+<script src="/static/plotly-2.35.2.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f5f6fa;color:#333;min-height:100vh}
+header{background:linear-gradient(135deg,#2c3e50 0%,#1e3c72 100%);color:#fff;padding:1.2rem 2rem;display:flex;align-items:center;gap:1rem}
+header h1{font-size:1.4rem;font-weight:700}
+header span{font-size:.85rem;opacity:.75}
+header nav{margin-left:auto;font-size:.85rem}
+header nav a{color:#fff;text-decoration:none;opacity:.7;padding:.3rem .7rem;border-radius:4px;margin-left:.3rem}
+header nav a:hover{opacity:1;background:rgba(255,255,255,0.1)}
+header nav a.active{opacity:1}
+.container{max-width:1500px;margin:0 auto;padding:1.5rem}
+.card{background:#fff;border-radius:8px;padding:1.5rem;margin-bottom:1.5rem;border:1px solid #ddd}
+.card h2{font-size:1.1rem;margin-bottom:1rem;color:#2c3e50}
+.info-banner{background:#e8f0fe;border:1px solid #4285f4;border-radius:6px;padding:.9rem 1.2rem;margin-bottom:1.5rem;font-size:.88rem;color:#1a3a6c;line-height:1.5}
+.info-banner strong{color:#1e3c72}
+.form-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
+.form-row label{font-weight:600;font-size:.88rem;min-width:90px}
+.form-row select,.form-row input[type=number]{padding:.5rem 1rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem;min-width:140px}
+.btn{padding:.6rem 1.5rem;border:none;border-radius:4px;font-size:.9rem;font-weight:600;cursor:pointer;transition:all .2s}
+.btn-primary{background:#1e3c72;color:#fff}
+.btn-primary:hover:not(:disabled){background:#163059}
+.btn-primary:disabled{opacity:.5;cursor:not-allowed}
+.btn-excel{background:#217346;color:#fff}
+.btn-excel:hover:not(:disabled){background:#1a5c38}
+.btn-excel:disabled{opacity:.5;cursor:not-allowed}
+.status{display:none;margin-top:.5rem}
+.status.active{display:block}
+.spinner{display:inline-block;width:18px;height:18px;border:3px solid #ddd;border-top-color:#1e3c72;border-radius:50%;animation:spin .8s linear infinite;vertical-align:middle;margin-right:.5rem}
+@keyframes spin{to{transform:rotate(360deg)}}
+.progress-wrap{background:#eee;border-radius:6px;height:14px;overflow:hidden;margin-top:.5rem}
+.progress-bar{background:linear-gradient(90deg,#27ae60,#3498db);height:100%;width:0%;transition:width .3s}
+.stage-text{font-size:.85rem;color:#666;margin-top:.3rem}
+.error{background:#f8d7da;border:1px solid #e74c3c;border-radius:6px;padding:1rem;margin-top:1rem;color:#721c24;display:none;font-size:.88rem}
+.error.active{display:block}
+.metric-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.8rem;margin-bottom:1.5rem}
+.metric{background:#fff;border:1px solid #ddd;border-radius:6px;padding:.9rem 1rem}
+.metric .v{font-size:1.4rem;font-weight:700;color:#1e3c72}
+.metric .l{font-size:.72rem;color:#888;text-transform:uppercase;margin-top:.2rem;font-weight:600}
+.metric.area-LC{border-left:4px solid #9b59b6}
+.metric.area-CH{border-left:4px solid #27ae60}
+.metric.area-CN{border-left:4px solid #3498db}
+.metric.area-MT{border-left:4px solid #e67e22}
+.area-block{margin-bottom:2rem}
+.area-block h3{font-size:1rem;margin-bottom:.7rem;padding:.5rem .8rem;border-radius:4px;color:#fff}
+.area-block.area-LC h3{background:#9b59b6}
+.area-block.area-CH h3{background:#27ae60}
+.area-block.area-CN h3{background:#3498db}
+.area-block.area-MT h3{background:#e67e22}
+.panel-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:1rem;margin-bottom:.8rem}
+.plotly-panel{background:#fff;border:1px solid #ddd;border-radius:6px;min-height:360px;min-width:0;overflow:hidden;position:relative}
+.plotly-panel > .js-plotly-plot,.plotly-panel > .js-plotly-plot .plotly{width:100%!important;height:100%!important}
+.diff-table-wrap{background:#fff;border:1px solid #ddd;border-radius:6px;overflow-x:auto;max-height:400px}
+table.diff{width:100%;border-collapse:collapse;font-size:.82rem}
+table.diff thead{position:sticky;top:0;z-index:1}
+table.diff th{padding:.5rem .6rem;text-align:center;color:#fff;font-weight:600;font-size:.78rem}
+table.diff td{padding:.35rem .6rem;border-bottom:1px solid #eee;text-align:center;font-variant-numeric:tabular-nums}
+table.diff tr:hover td{background:#f8f9fa}
+.area-LC table.diff th{background:#9b59b6}
+.area-CH table.diff th{background:#27ae60}
+.area-CN table.diff th{background:#3498db}
+.area-MT table.diff th{background:#e67e22}
+details{background:#f8f9fa;border:1px solid #ddd;border-radius:6px;padding:.7rem 1rem;margin-bottom:.8rem}
+details summary{cursor:pointer;font-weight:600;font-size:.85rem;color:#2c3e50}
+details[open] summary{margin-bottom:.7rem}
+.results{display:none}
+.results.active{display:block}
+footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
+.hint{font-size:.78rem;color:#888;margin-top:.5rem}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="/static/logotipo.png" alt="X-TRI logo" style="height:48px;width:auto;margin-right:.8rem">
+  <h1>XTRI Engine</h1>
+  <span>Análise de Microdados ENEM (INEP oficial)</span>
+  <nav>
+    <a href="/">Motor</a>
+    <a href="/validator">Validator</a>
+    <a href="/microdata" class="active">Microdados</a>
+  </nav>
+</header>
+
+<div class="container">
+
+  <div class="info-banner">
+    <strong>Análise INEP-only.</strong> Esta página carrega os <strong>microdados oficiais</strong>
+    (MICRODADOS_ENEM_&lt;ano&gt;.csv), filtra alunos válidos (presentes nas 4 áreas + redação),
+    coleta uma amostra aleatória, e gera relatórios <strong>interativos</strong> baseados nas
+    notas oficiais <strong>NU_NOTA_*</strong> diretamente da INEP. Hover nos gráficos para detalhes
+    por aluno. O scatter <em>Acertos × Nota</em> usa gradiente Primi por <code>acert_dif</code>
+    (proporção de acertos em itens difíceis).
+  </div>
+
+  <div class="card">
+    <h2>Análise</h2>
+
+    <div class="form-row">
+      <label for="ano">Ano ENEM:</label>
+      <select id="ano"><option>Carregando…</option></select>
+
+      <label for="sample">Tamanho da amostra:</label>
+      <select id="sample">
+        <option value="50000">50.000 alunos</option>
+        <option value="100000">100.000 alunos</option>
+        <option value="200000" selected>200.000 alunos</option>
+      </select>
+
+      <button class="btn btn-primary" id="btnAnalisar" disabled>Analisar</button>
+      <button class="btn btn-excel" id="btnExcel" disabled>Baixar Excel (relatório + gráficos)</button>
+      <button class="btn btn-excel" id="btnCsv" disabled>Baixar CSV (todos os alunos)</button>
+    </div>
+
+    <div class="hint" id="hint"></div>
+
+    <div class="status" id="status">
+      <div><span class="spinner"></span><span id="statusMsg">Iniciando…</span></div>
+      <div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+      <div class="stage-text" id="stageText">—</div>
+    </div>
+
+    <div class="error" id="errorBox"></div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="card">
+      <h2>Resumo INEP — Estatísticas Descritivas das Notas Oficiais</h2>
+      <div class="metric-grid" id="summaryGrid"></div>
+      <div class="hint">Estatísticas calculadas diretamente sobre <code>NU_NOTA_*</code> do arquivo de microdados oficial INEP.</div>
+    </div>
+
+    <div class="card">
+      <h2>Dashboards por Área (interativos · hover para detalhes)</h2>
+      <div id="areaBlocks"></div>
+    </div>
+  </div>
+
+</div>
+
+<footer>XTRI Engine — Microdata Analysis (Phase 8) | Plotly + INEP NU_NOTA</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const AREAS = ["LC", "CH", "CN", "MT"];
+const AREA_NAMES = {LC: "Linguagens", CH: "Ciências Humanas", CN: "Ciências da Natureza", MT: "Matemática"};
+const AREA_COLORS = {LC: "#9b59b6", CH: "#27ae60", CN: "#3498db", MT: "#e67e22"};
+
+// ── Bootstrap ──
+async function loadAnos() {
+  try {
+    const r = await fetch("/api/v5/microdata/anos-disponiveis");
+    const d = await r.json();
+    const sel = $("#ano");
+    sel.innerHTML = "";
+    if (!d.anos || d.anos.length === 0) {
+      sel.innerHTML = "<option value=''>Nenhum CSV encontrado em " + d.microdata_dir + "</option>";
+      $("#hint").textContent = "Coloque MICRODADOS_ENEM_<ano>.csv em " + d.microdata_dir + " e recarregue.";
+      return;
+    }
+    d.anos.forEach(y => {
+      const opt = document.createElement("option");
+      opt.value = y;
+      opt.textContent = y;
+      sel.appendChild(opt);
+    });
+    sel.value = d.anos[d.anos.length - 1];
+    await refreshStatus();
+  } catch (e) {
+    $("#hint").textContent = "Erro ao listar anos: " + e.message;
+  }
+}
+
+async function refreshStatus() {
+  const ano = $("#ano").value;
+  if (!ano) return;
+  try {
+    const r = await fetch("/api/v5/microdata/status/" + ano);
+    const d = await r.json();
+    $("#btnAnalisar").disabled = !d.csv_exists;
+    if (!d.csv_exists) {
+      $("#hint").textContent = "CSV ausente: " + d.csv_path;
+    } else if (d.cache_calibrated_present) {
+      $("#hint").textContent = `CSV ${d.csv_size_mb.toFixed(0)} MB · cache pronto · clique Analisar para abrir o relatório imediatamente.`;
+    } else if (d.cache_raw_present) {
+      $("#hint").textContent = `CSV ${d.csv_size_mb.toFixed(0)} MB · cache bruto pronto · clique Analisar para processar (~1 min).`;
+    } else {
+      $("#hint").textContent = `CSV ${d.csv_size_mb.toFixed(0)} MB · sem cache · clique Analisar (load + processar ~1-2 min).`;
+    }
+  } catch (e) {
+    $("#hint").textContent = "Erro ao verificar status: " + e.message;
+  }
+}
+
+$("#ano").addEventListener("change", refreshStatus);
+
+// ── Analisar: kick off pipeline + poll ──
+$("#btnAnalisar").addEventListener("click", async () => {
+  const ano = parseInt($("#ano").value, 10);
+  const sample = parseInt($("#sample").value, 10);
+  if (!ano) return;
+
+  $("#errorBox").classList.remove("active");
+  $("#results").classList.remove("active");
+  $("#status").classList.add("active");
+  $("#statusMsg").textContent = "Iniciando pipeline…";
+  $("#progressBar").style.width = "0%";
+  $("#stageText").textContent = "—";
+  $("#btnAnalisar").disabled = true;
+
+  let jobId = null;
+  try {
+    const r = await fetch("/api/v5/microdata/prepare", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({year: ano, sample_size: sample, force_rerun: false}),
+    });
+    if (!r.ok) throw new Error((await r.json()).detail || "Falha ao iniciar");
+    const data = await r.json();
+    jobId = data.job_id;
+    $("#statusMsg").textContent = "Job " + jobId + " — " + data.status;
+  } catch (e) {
+    showError(e.message);
+    return;
+  }
+
+  // Poll
+  const pollInterval = setInterval(async () => {
+    try {
+      const r = await fetch("/api/v5/microdata/job/" + jobId);
+      if (!r.ok) {
+        clearInterval(pollInterval);
+        showError("Job desconhecido");
+        return;
+      }
+      const job = await r.json();
+      const pct = Math.round((job.progress || 0) * 100);
+      $("#progressBar").style.width = pct + "%";
+      $("#stageText").textContent = (job.stage || "—") + (job.elapsed_seconds ? ` · ${job.elapsed_seconds.toFixed(1)}s` : "");
+      $("#statusMsg").textContent = `Job ${jobId} — ${job.status} (${pct}%)`;
+
+      if (job.status === "done") {
+        clearInterval(pollInterval);
+        $("#statusMsg").textContent = `Job ${jobId} concluído em ${job.elapsed_seconds.toFixed(1)}s`;
+        await renderReport(ano);
+        $("#status").classList.remove("active");
+        $("#btnAnalisar").disabled = false;
+        $("#btnExcel").disabled = false;
+        $("#btnCsv").disabled = false;
+      } else if (job.status === "error") {
+        clearInterval(pollInterval);
+        showError(job.error || "Erro desconhecido");
+      }
+    } catch (e) {
+      clearInterval(pollInterval);
+      showError(e.message);
+    }
+  }, 2000);
+});
+
+function showError(msg) {
+  $("#errorBox").textContent = msg;
+  $("#errorBox").classList.add("active");
+  $("#status").classList.remove("active");
+  $("#btnAnalisar").disabled = false;
+}
+
+// ── Render report (per-area Plotly + difficulty table) ──
+async function renderReport(ano) {
+  const blocksHtml = AREAS.map(area => `
+    <div class="area-block area-${area}">
+      <h3>${area} — ${AREA_NAMES[area]}</h3>
+      <div class="panel-grid">
+        <div class="plotly-panel" id="hist_${area}"></div>
+        <div class="plotly-panel" id="scatter_${area}"></div>
+        <div class="plotly-panel" id="box_${area}"></div>
+      </div>
+      <details>
+        <summary>Tabela de Dificuldades — ${area} (INEP empírico, NU_NOTA real)</summary>
+        <div class="diff-table-wrap"><table class="diff" id="table_${area}"><thead><tr><th>Ac</th><th>Freq</th><th>Min</th><th>Med</th><th>Max</th></tr></thead><tbody></tbody></table></div>
+      </details>
+    </div>
+  `).join("");
+  $("#areaBlocks").innerHTML = blocksHtml;
+
+  // Reset summary grid (filled in as each area loads)
+  $("#summaryGrid").innerHTML = AREAS.map(a =>
+    `<div class="metric area-${a}" id="summary_${a}"><div class="v">…</div><div class="l">${a} carregando</div></div>`
+  ).join("");
+
+  // Fetch + render each area in parallel
+  await Promise.all(AREAS.map(async area => {
+    try {
+      const [dataR, dashR] = await Promise.all([
+        fetch(`/api/v5/microdata/dashboard-data/${ano}?area=${area}`),
+        fetch(`/api/v5/microdata/dashboard/${ano}?area=${area}`),  // legacy: gives us the difficulty table
+      ]);
+      if (!dataR.ok) throw new Error(`dashboard-data ${area} falhou`);
+      const data = await dataR.json();
+      renderAreaPlots(area, data);
+      renderSummaryCard(area, data.summary);
+
+      if (dashR.ok) {
+        const dash = await dashR.json();
+        renderDifficultyTable(area, dash.difficulty_table);
+      }
+    } catch (e) {
+      console.error("area render failed", area, e);
+    }
+  }));
+
+  $("#results").classList.add("active");
+
+  // Force Plotly to recompute sizes after the results card becomes visible.
+  // Without this, charts initialised while display:none sometimes keep the
+  // wrong width and overflow their grid cell.
+  requestAnimationFrame(() => {
+    AREAS.forEach(area => {
+      ["hist_", "scatter_", "box_"].forEach(prefix => {
+        const el = document.getElementById(prefix + area);
+        if (el && window.Plotly) Plotly.Plots.resize(el);
+      });
+    });
+  });
+
+  // Also handle window resize for user zoom changes
+  if (!window._xtriResizeHandlerInstalled) {
+    window._xtriResizeHandlerInstalled = true;
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        AREAS.forEach(area => {
+          ["hist_", "scatter_", "box_"].forEach(prefix => {
+            const el = document.getElementById(prefix + area);
+            if (el && window.Plotly) Plotly.Plots.resize(el);
+          });
+        });
+      }, 150);
+    });
+  }
+}
+
+function renderSummaryCard(area, s) {
+  const el = $("#summary_" + area);
+  if (!el || !s) return;
+  el.innerHTML = `
+    <div class="v">${s.median != null ? s.median.toFixed(0) : "—"}</div>
+    <div class="l">${area} — Mediana INEP</div>
+    <div style="font-size:.7rem;color:#888;margin-top:.3rem">N=${(s.n||0).toLocaleString("pt-BR")} · μ=${s.mean!=null?s.mean.toFixed(0):"—"} · P25=${s.p25!=null?s.p25.toFixed(0):"—"} · P75=${s.p75!=null?s.p75.toFixed(0):"—"} · max=${s.max!=null?s.max.toFixed(0):"—"}</div>
+  `;
+}
+
+function renderDifficultyTable(area, rows) {
+  if (!rows) return;
+  const tbody = $("#table_" + area + " tbody");
+  if (!tbody) return;
+  tbody.innerHTML = rows.map(r => `
+    <tr><td>${r.acertos}</td><td>${r.freq}</td><td>${r.tri_min.toFixed(1)}</td><td><strong>${r.tri_med.toFixed(1)}</strong></td><td>${r.tri_max.toFixed(1)}</td></tr>
+  `).join("");
+}
+
+// ── Plotly chart builders ──
+
+function renderAreaPlots(area, data) {
+  const color = AREA_COLORS[area];
+  renderHistogram(area, data, color);
+  renderScatterPrimi(area, data, color);
+  renderBoxplot(area, data, color);
+}
+
+// Shared Plotly config for every panel — responsive, no modebar, transparent BG
+const PLOTLY_CONFIG = {responsive: true, displayModeBar: false};
+// Shared layout base: autosize + tight margins so panels fit inside grid cells
+const BASE_LAYOUT = {
+  autosize: true,
+  height: 360,
+  paper_bgcolor: "rgba(0,0,0,0)",
+  plot_bgcolor: "rgba(0,0,0,0)",
+  font: {size: 11},
+};
+
+function renderHistogram(area, data, color) {
+  const edges = data.histogram.bin_edges;
+  const counts = data.histogram.counts;
+  const centers = [];
+  const widths = [];
+  for (let i = 0; i < counts.length; i++) {
+    centers.push((edges[i] + edges[i+1]) / 2);
+    widths.push(edges[i+1] - edges[i]);
+  }
+  const trace = {
+    x: centers,
+    y: counts,
+    width: widths,
+    type: "bar",
+    marker: {color: color, opacity: 0.75, line: {color: color, width: 0}},
+    hovertemplate: "Faixa: %{customdata[0]:.0f}–%{customdata[1]:.0f}<br>Alunos: %{y:,}<extra></extra>",
+    customdata: edges.slice(0, -1).map((e, i) => [e, edges[i+1]]),
+  };
+  const layout = Object.assign({}, BASE_LAYOUT, {
+    title: {text: `${area} — Distribuição de Notas (INEP)`, font: {size: 13}},
+    xaxis: {title: "NU_NOTA"},
+    yaxis: {title: "Frequência"},
+    margin: {l: 55, r: 15, t: 40, b: 45},
+    bargap: 0.05,
+    shapes: data.summary.mean != null ? [{
+      type: "line",
+      x0: data.summary.mean, x1: data.summary.mean,
+      y0: 0, y1: 1, yref: "paper",
+      line: {color: color, dash: "dash", width: 2},
+    }] : [],
+    annotations: data.summary.mean != null ? [{
+      x: data.summary.mean, y: 1, yref: "paper",
+      text: `μ=${data.summary.mean.toFixed(0)}`,
+      showarrow: false, yshift: 10, font: {color: color, size: 11},
+    }] : [],
+  });
+  Plotly.newPlot("hist_" + area, [trace], layout, PLOTLY_CONFIG);
+}
+
+function renderScatterPrimi(area, data, color) {
+  const trace = {
+    x: data.scatter.acertos,
+    y: data.scatter.nota,
+    mode: "markers",
+    type: "scattergl",
+    marker: {
+      size: 4,
+      color: data.scatter.acert_dif,
+      colorscale: "Viridis",
+      cmin: 0, cmax: 1,
+      showscale: true,
+      colorbar: {title: {text: "acert_dif", side: "right"}, thickness: 10, len: 0.82, x: 1.02},
+      opacity: 0.75,
+    },
+    customdata: data.scatter.acert_dif,
+    hovertemplate: "Acertos: %{x}<br>Nota: %{y:.1f}<br>acert_dif: %{customdata:.3f}<extra></extra>",
+  };
+  const layout = Object.assign({}, BASE_LAYOUT, {
+    title: {
+      text: `${area} — Acertos × Nota (gradiente Primi)<br><span style="font-size:10px;color:#888">${data.scatter.n_displayed.toLocaleString("pt-BR")} de ${data.scatter.n_total.toLocaleString("pt-BR")} alunos</span>`,
+      font: {size: 13},
+    },
+    xaxis: {title: "Acertos"},
+    yaxis: {title: "NU_NOTA"},
+    margin: {l: 55, r: 65, t: 50, b: 45},
+  });
+  Plotly.newPlot("scatter_" + area, [trace], layout, PLOTLY_CONFIG);
+}
+
+function renderBoxplot(area, data, color) {
+  const x = data.boxplot.map(r => r.acertos);
+  const trace = {
+    type: "box",
+    x: x,
+    q1: data.boxplot.map(r => r.q1),
+    median: data.boxplot.map(r => r.median),
+    q3: data.boxplot.map(r => r.q3),
+    lowerfence: data.boxplot.map(r => r.min),
+    upperfence: data.boxplot.map(r => r.max),
+    marker: {color: color},
+    line: {color: color, width: 1},
+    fillcolor: color,
+    opacity: 0.55,
+    name: area,
+    hovertemplate: "Acertos: %{x}<br>Mediana: %{median:.1f}<br>Q1: %{q1:.1f}<br>Q3: %{q3:.1f}<br>Min: %{lowerfence:.1f}<br>Max: %{upperfence:.1f}<extra></extra>",
+  };
+  const layout = Object.assign({}, BASE_LAYOUT, {
+    title: {text: `${area} — Boxplot por Faixa de Acertos`, font: {size: 13}},
+    xaxis: {title: "Acertos", tickmode: "linear", dtick: 5, range: [-0.5, 46]},
+    yaxis: {title: "NU_NOTA"},
+    margin: {l: 55, r: 15, t: 40, b: 45},
+    showlegend: false,
+  });
+  Plotly.newPlot("box_" + area, [trace], layout, PLOTLY_CONFIG);
+}
+
+// ── Generic download helper ──
+async function downloadFromEndpoint(button, endpointPath, fileName, busyLabel) {
+  const ano = parseInt($("#ano").value, 10);
+  if (!ano) return;
+  button.disabled = true;
+  const oldText = button.textContent;
+  button.textContent = busyLabel;
+  const t0 = Date.now();
+  const timer = setInterval(() => {
+    const sec = Math.round((Date.now() - t0) / 1000);
+    button.textContent = `${busyLabel} (${sec}s)`;
+  }, 1000);
+  try {
+    const r = await fetch(endpointPath.replace("{year}", ano));
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({detail: "Falha"}));
+      throw new Error(err.detail || "Falha");
+    }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName.replace("{year}", ano);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  } catch (e) {
+    showError(`Erro: ${e.message}`);
+  } finally {
+    clearInterval(timer);
+    button.disabled = false;
+    button.textContent = oldText;
+  }
+}
+
+$("#btnExcel").addEventListener("click", () => {
+  downloadFromEndpoint(
+    $("#btnExcel"),
+    "/api/v5/microdata/export-excel/{year}",
+    "xtri_microdados_{year}.xlsx",
+    "Gerando Excel…",
+  );
+});
+
+$("#btnCsv").addEventListener("click", () => {
+  downloadFromEndpoint(
+    $("#btnCsv"),
+    "/api/v5/microdata/export-csv/{year}",
+    "xtri_microdados_alunos_{year}.csv",
+    "Gerando CSV…",
+  );
+});
+
+// Bootstrap
+loadAnos();
+</script>
+</body>
+</html>

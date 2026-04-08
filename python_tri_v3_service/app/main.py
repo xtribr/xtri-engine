@@ -12,6 +12,7 @@
 ╚════════════════════════════════════════════════════════════════════════════════╝
 """
 
+import io
 import os
 import sys
 import time
@@ -1300,8 +1301,11 @@ import asyncio  # noqa: PLC0415
 import base64  # noqa: PLC0415
 
 from .microdata import (  # noqa: PLC0415
+    build_microdata_csv,
+    build_microdata_excel,
     calibrate_all_areas,
     calibration_summary,
+    compute_dashboard_data,
     compute_difficulty_table,
     detect_schema,
     load_microdata,
@@ -1591,6 +1595,86 @@ async def v5_microdata_full_report(year: int):
     )
 
 
+@app.get("/api/v5/microdata/dashboard-data/{year}")
+async def v5_microdata_dashboard_data(year: int, area: str):
+    """INEP-only JSON payload for the interactive Plotly frontend.
+
+    Returns histogram bins, scatter points (acertos × nota colored by acert_dif),
+    and per-acertos boxplot data — all computed from the official ``NU_NOTA_*``
+    columns in the microdata. NO V3 Local references; this endpoint is for the
+    Phase 8 microdata page which is strictly an INEP-only analysis.
+
+    Use this instead of /dashboard/{year} (which returns a static base64 PNG).
+    """
+    area = area.upper()
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Invalid area: {area}")
+    df, _ = _load_calibrated_or_404(year)
+    payload = compute_dashboard_data(df, area)
+    payload["year"] = year
+    return payload
+
+
+@app.get("/api/v5/microdata/export-excel/{year}")
+async def v5_microdata_export_excel(year: int, include_students: bool = False):
+    """Stream the multi-sheet Excel report for one ENEM year.
+
+    Sheets:
+        Resumo               — title + per-area metrics
+        Relatorio Completo   — embedded 4×3 full report PNG
+        <area> sheets        — embedded per-area dashboard PNG + INEP empirical
+                               difficulty table (one per LC/CH/CN/MT)
+        Alunos (optional)    — full per-student data, only when
+                               ``?include_students=true``. Adds ~50s + 25 MB.
+                               For raw per-student data the CSV endpoint is
+                               much faster — see /api/v5/microdata/export-csv/
+
+    Default mode (without ``include_students``) builds in ~10s and is ~5 MB.
+
+    Returns 404 if the calibrated cache for ``year`` is not on disk.
+    """
+    df, _ = _load_calibrated_or_404(year)
+    summaries = calibration_summary(df)
+    xlsx_bytes = build_microdata_excel(
+        df, year, summaries, include_students=include_students
+    )
+
+    suffix = "_full" if include_students else ""
+    filename = f"xtri_microdados_{year}{suffix}.xlsx"
+    return StreamingResponse(
+        io.BytesIO(xlsx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(xlsx_bytes)),
+        },
+    )
+
+
+@app.get("/api/v5/microdata/export-csv/{year}")
+async def v5_microdata_export_csv(year: int):
+    """Stream the per-student CSV with diff columns for one ENEM year.
+
+    Much faster than the Excel "Alunos" sheet (pandas to_csv vs openpyxl
+    serialization is ~30x). UTF-8 with BOM so Excel auto-detects encoding.
+    Use this when you need the raw per-student data; use the Excel endpoint
+    for the dashboards + summary report.
+
+    Returns 404 if the calibrated cache for ``year`` is not on disk.
+    """
+    df, _ = _load_calibrated_or_404(year)
+    csv_bytes = build_microdata_csv(df)
+    filename = f"xtri_microdados_alunos_{year}.csv"
+    return StreamingResponse(
+        io.BytesIO(csv_bytes),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Length": str(len(csv_bytes)),
+        },
+    )
+
+
 # ════════════════════════════════════════════════════════════════════════════════
 # ENDPOINT — EXPORTAR EXCEL
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1850,6 +1934,12 @@ async def frontend():
 async def frontend_validator():
     """Serve the INEP validator page."""
     return FileResponse(os.path.join(_static_dir, "validator.html"))
+
+
+@app.get("/microdata", include_in_schema=False)
+async def frontend_microdata():
+    """Serve the microdata analysis page (Phase 8)."""
+    return FileResponse(os.path.join(_static_dir, "microdata.html"))
 
 
 if os.path.isdir(_static_dir):

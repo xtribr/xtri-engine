@@ -236,6 +236,25 @@ Two features described in the user's April 8 request (shared alongside `mente_ma
 - 10 new TestClient unit tests covering: route existence, 404 handling, 400 invalid area, base64 PNG decode + magic check, real-data full pipeline against the cached parquet.
 - Full suite 179 green (was 169 before P5).
 
+**Phase 8 P6 complete (2026-04-08, commit pending)**:
+
+- New page at `/microdata` — pure client-side Plotly, INEP-only, no V3 references anywhere on the page or in the exports.
+- **Bundled Plotly.js 2.35.2** locally at `static/plotly-2.35.2.min.js` (4.3 MB, offline-friendly per user preference).
+- **Per-area 3-panel dashboards** rendered via `Plotly.newPlot`:
+  - Histogram of `NU_NOTA_*` with mean line annotation, hover shows bin range + student count
+  - Acertos × Nota **scatter with Primi gradient** — colored by `acert_dif` (Viridis colormap, colorbar legend), WebGL-backed, subsampled to 30K points, hover shows `(acertos, nota, acert_dif)`
+  - Boxplot per acertos count — pre-aggregated q1/median/q3/min/max, hover shows full 5-number summary
+- New endpoint `GET /api/v5/microdata/dashboard-data/{year}?area=` returns JSON payload (histogram bins, scatter arrays, boxplot stats) — replaces the base64 PNG path for the interactive page. Old PNG endpoints kept alive for backward compatibility.
+- **Difficulty table spread fix**: `compute_difficulty_table` now uses `nota_ref_*` (official INEP) instead of `nota_v3_*` (cohort-anchored compressed). Ac 33 MT was showing 827.3/827.4/827.4 (compressed artifact); now shows 758.9/789.8/819.8 (real INEP empirical spread). Unit test added that asserts spread > 1.0 for multi-student rows.
+- **Excel/CSV export split**: the original combined Excel took 78s for 33 MB. Split into:
+  - `/api/v5/microdata/export-excel/{year}` — lightweight INEP-only Excel (Resumo + Relatorio Completo + 4 area sheets with difficulty tables + embedded matplotlib PNGs). Default: **3.3s, 860 KB**. Opt-in `?include_students=true` adds the Alunos sheet (+50s, +30 MB).
+  - `/api/v5/microdata/export-csv/{year}` — per-student CSV with 9 INEP-only columns (NU_SEQUENCIAL, geo, per-area acertos/nota_ref/acert_dif). **16s, 31 MB**.
+  - Frontend has two buttons with live elapsed-time counter.
+- **INEP-only content**: V3 Local columns (`theta_v3`, `nota_v3`, `diff`, `estado_v3`, plus correlation/MAE/RMSE comparisons) removed from the Resumo sheet, the Alunos sheet, the CSV, and the page metrics. The microdata page is strictly an analysis of the OFFICIAL `NU_NOTA_*` values from INEP. V3 Local remains untouched on `/` and `/validator`.
+- **Layout overflow fix**: CSS grid cells were overflowing their container because `1fr` defaults to `min-content` lower bound. Changed to `repeat(3, minmax(0, 1fr))` + `min-width:0; overflow:hidden` on `.plotly-panel`. Plotly layouts got `autosize: true` and explicit `height: 360`. Added post-render `requestAnimationFrame` calling `Plotly.Plots.resize()` + window-resize listener (debounced 150ms) for proper sizing across zoom/window changes.
+- 20 new unit tests (10 for Excel/CSV, 10 for dashboard-data) covering all endpoints end-to-end including real 200K parquet integration. Full suite **200 green** (was 180 before P6).
+- Cross-page nav links: added "Microdados" to both `/` and `/validator` nav bars.
+
 **Tier 2 (future, optional)**: native menu bar, file dialogs, Dock drag-drop, macOS notifications, Spotlight.
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)

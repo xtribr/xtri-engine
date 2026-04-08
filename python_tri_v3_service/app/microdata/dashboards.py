@@ -57,12 +57,21 @@ AREA_LABELS_PT: dict[str, str] = {
 
 
 def compute_difficulty_table(df: pd.DataFrame, area: str) -> list[dict[str, Any]]:
-    """Per-acertos cohort-empirical Min/Med/Max table for the microdata sample.
+    """Per-acertos empirical Min/Med/Max table from the OFFICIAL INEP scores.
 
-    Same shape as the user's reference PDF tables (Acertos / Freq / Min / Med /
-    Max), but computed from the actual sample's V3 Local notas. Only acertos
-    counts that have at least one student in the cohort are included — no
-    "phantom" rows.
+    Mirrors the structure of the user's reference PDF tables (Acertos / Freq /
+    Min / Med / Max). Each row aggregates the official ``NU_NOTA_{area}``
+    values (already present in the microdata, computed by INEP using the real
+    item parameters) over all students in the sample with that acertos count.
+
+    Why ``nota_ref_*`` and not ``nota_v3_*``: V3 Local uses cohort-anchored
+    z-score scoring, which compresses the within-band spread to near-zero for
+    most acertos counts. INEP uses item-level parameters that DIFFERENTIATE
+    students with the same acertos but different response patterns (Primi
+    "differential scoring"), producing a real Min<Med<Max range. The user
+    explicitly wants this spread visible (matching the PDF tables they shared).
+
+    Only acertos counts present in the cohort are included — no phantom rows.
 
     Args:
         df: Calibrated DataFrame from :func:`calibrate_all_areas`.
@@ -71,11 +80,12 @@ def compute_difficulty_table(df: pd.DataFrame, area: str) -> list[dict[str, Any]
     Returns:
         List of dicts ``[{"acertos": int, "freq": int, "tri_min": float,
         "tri_med": float, "tri_max": float}, ...]`` sorted by acertos ascending.
-        Empty if no students were calibrated for this area.
+        Empty if neither the V3 acertos column nor the reference nota column
+        is present.
     """
     al = area.lower()
-    nota_col = f"nota_v3_{al}"
-    ac_col = f"acertos_v3_{al}"
+    nota_col = f"nota_ref_{al}"  # OFFICIAL INEP score from the microdata
+    ac_col = f"acertos_v3_{al}"  # V3 acertos count (same as official, computed in calibration)
     if nota_col not in df.columns or ac_col not in df.columns:
         return []
 
@@ -341,7 +351,7 @@ def render_difficulty_table_png(df: pd.DataFrame, area: str, *, dpi: int = 110) 
             cell.set_text_props(color="white", fontweight="bold")
 
     fig.suptitle(
-        f"{AREA_LABELS_PT[area]} ({area}) — Tabela de Dificuldades (cohort-empirical)",
+        f"{AREA_LABELS_PT[area]} ({area}) — Tabela de Dificuldades (INEP empírico)",
         fontsize=12,
         fontweight="bold",
         y=1.02,

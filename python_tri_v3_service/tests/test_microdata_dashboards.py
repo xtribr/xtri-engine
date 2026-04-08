@@ -74,8 +74,31 @@ class TestDifficultyTable:
             assert r["tri_min"] <= r["tri_med"] <= r["tri_max"]
 
     @pytest.mark.unit
-    def test_empty_when_no_v3_data(self):
-        df = pd.DataFrame({"nota_v3_mt": [None, None], "acertos_v3_mt": [None, None]})
+    def test_table_uses_nota_ref_not_nota_v3(self, calibrated_synthetic_df):
+        """Difficulty table must aggregate the OFFICIAL INEP scores (nota_ref_*),
+        not the cohort-anchored V3 Local scores. This was a real bug found in
+        Phase 8 P6: V3 Local cohort-anchored compresses within-band variance to
+        near-zero (Min ≈ Med ≈ Max), making the table look broken. Reference
+        notas have real spread because INEP differential scoring discriminates
+        students with the same acertos but different response patterns.
+        """
+        rows = compute_difficulty_table(calibrated_synthetic_df, "MT")
+        assert len(rows) > 5
+        # Find rows with multiple students — these MUST show real spread
+        multi_student_rows = [r for r in rows if r["freq"] >= 5]
+        assert len(multi_student_rows) > 0, "fixture has no multi-student rows"
+        spread_count = sum(
+            1 for r in multi_student_rows if r["tri_max"] - r["tri_min"] > 1.0
+        )
+        # At least half of the multi-student rows should show non-trivial spread
+        assert spread_count >= len(multi_student_rows) / 2, (
+            f"Expected real spread in difficulty table (using nota_ref_*), "
+            f"only {spread_count}/{len(multi_student_rows)} rows have Max-Min > 1.0"
+        )
+
+    @pytest.mark.unit
+    def test_empty_when_no_ref_data(self):
+        df = pd.DataFrame({"nota_ref_mt": [None, None], "acertos_v3_mt": [None, None]})
         assert compute_difficulty_table(df, "MT") == []
 
     @pytest.mark.unit
