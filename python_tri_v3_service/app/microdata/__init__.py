@@ -11,6 +11,7 @@ Public surface:
 See Phase 7 notes in task_plan.md for the phased implementation plan.
 """
 
+from app.microdata.breakdown import compute_breakdown
 from app.microdata.calibration import (
     calibrate_all_areas,
     calibrate_area_group,
@@ -25,6 +26,7 @@ from app.microdata.dashboards import (
 )
 from app.microdata.excel_export import build_microdata_csv, build_microdata_excel
 from app.microdata.loader import load_microdata
+from app.microdata.report import build_payload, build_prompt, generate_report
 from app.microdata.schema import MicrodataSchema, detect_schema
 
 __all__ = [
@@ -41,4 +43,8 @@ __all__ = [
     "build_microdata_excel",
     "build_microdata_csv",
     "compute_dashboard_data",
+    "compute_breakdown",
+    "build_payload",
+    "build_prompt",
+    "generate_report",
 ]

@@ -70,6 +70,54 @@ table.diff tr:hover td{background:#f8f9fa}
 details{background:#f8f9fa;border:1px solid #ddd;border-radius:6px;padding:.7rem 1rem;margin-bottom:.8rem}
 details summary{cursor:pointer;font-weight:600;font-size:.85rem;color:#2c3e50}
 details[open] summary{margin-bottom:.7rem}
+/* ── Drill-down table ── */
+.drill-controls{display:flex;align-items:center;gap:.8rem;flex-wrap:wrap;margin-bottom:1rem}
+.drill-controls label{font-size:.82rem;font-weight:600;color:#555}
+.drill-controls select{padding:.45rem .8rem;border:1px solid #ddd;border-radius:4px;font-size:.88rem}
+.drill-controls .chip{padding:.35rem .8rem;background:#f1f3f5;border:1px solid #ddd;border-radius:999px;font-size:.78rem;color:#555}
+.drill-controls .chip.active{background:#1e3c72;color:#fff;border-color:#1e3c72}
+.drill-controls button.chip{cursor:pointer}
+.drill-table-wrap{background:#fff;border:1px solid #ddd;border-radius:6px;overflow-x:auto;max-height:600px}
+table.drill{width:100%;border-collapse:collapse;font-size:.82rem;min-width:780px}
+table.drill thead{position:sticky;top:0;background:#2c3e50;color:#fff;z-index:1}
+table.drill th{padding:.55rem .7rem;text-align:center;font-weight:600;font-size:.76rem;white-space:nowrap;cursor:pointer;user-select:none}
+table.drill th:hover{background:#1e3c72}
+table.drill th.sort-asc::after{content:" ▲";font-size:.7em}
+table.drill th.sort-desc::after{content:" ▼";font-size:.7em}
+table.drill td{padding:.35rem .7rem;border-bottom:1px solid #eee;text-align:right;font-variant-numeric:tabular-nums}
+table.drill td.text-left{text-align:left}
+table.drill tbody tr:nth-child(odd){background:#fafbfc}
+table.drill tbody tr:hover{background:#e8f0fe}
+.drill-status{font-size:.78rem;color:#888;margin-top:.5rem}
+/* ── AI report button + modal ── */
+.btn-ai{background:#8e44ad;color:#fff}
+.btn-ai:hover:not(:disabled){background:#703688}
+.btn-ai:disabled{opacity:.5;cursor:not-allowed}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.5);display:none;z-index:50;align-items:center;justify-content:center;padding:2rem}
+.modal-backdrop.active{display:flex}
+.modal{background:#fff;border-radius:8px;max-width:900px;width:100%;max-height:90vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-head{padding:1rem 1.5rem;border-bottom:1px solid #ddd;display:flex;align-items:center;justify-content:space-between;background:#f8f9fa}
+.modal-head h3{font-size:1.05rem;color:#2c3e50;margin:0}
+.modal-head button{background:none;border:none;font-size:1.4rem;cursor:pointer;color:#666}
+.modal-head button:hover{color:#e74c3c}
+.modal-body{padding:1.5rem;overflow-y:auto;flex:1;line-height:1.6;font-size:.9rem;color:#333}
+.modal-body h1{font-size:1.4rem;margin:1rem 0 .6rem;color:#2c3e50;border-bottom:2px solid #1e3c72;padding-bottom:.3rem}
+.modal-body h2{font-size:1.15rem;margin:1.2rem 0 .5rem;color:#1e3c72}
+.modal-body h3{font-size:1rem;margin:.8rem 0 .4rem;color:#1e3c72}
+.modal-body p{margin-bottom:.8rem}
+.modal-body ul,.modal-body ol{margin:.5rem 0 .8rem 1.5rem}
+.modal-body li{margin-bottom:.3rem}
+.modal-body table{border-collapse:collapse;margin:.8rem 0;width:100%;font-size:.82rem}
+.modal-body th,.modal-body td{border:1px solid #ddd;padding:.35rem .55rem;text-align:left}
+.modal-body th{background:#f1f3f5;font-weight:600}
+.modal-body code{background:#f1f3f5;padding:.1rem .35rem;border-radius:3px;font-size:.85em}
+.modal-body strong{color:#1e3c72}
+.modal-foot{padding:.9rem 1.5rem;border-top:1px solid #ddd;background:#f8f9fa;display:flex;gap:.7rem;justify-content:space-between;align-items:center;font-size:.8rem;color:#666}
+.modal-foot .meta{flex:1}
+.modal-foot button{padding:.45rem 1rem;border:none;border-radius:4px;cursor:pointer;font-size:.82rem;font-weight:600}
+.modal-foot .download{background:#1e3c72;color:#fff}
+.modal-foot .close{background:#ddd;color:#333}
+.modal-body .loading{color:#888;font-style:italic;text-align:center;padding:2rem 0}
 .results{display:none}
 .results.active{display:block}
 footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
@@ -141,11 +189,64 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.78rem}
       <h2>Dashboards por Área (interativos · hover para detalhes)</h2>
       <div id="areaBlocks"></div>
     </div>
+
+    <div class="card">
+      <h2>Drill-down Geográfico (INEP)</h2>
+      <p class="hint" style="margin-bottom:.9rem">
+        Compare Estados, Municípios ou Escolas pela mediana INEP.
+        <strong>Clique nos cabeçalhos</strong> para ordenar. Escolas com menos de 5 alunos na amostra são excluídas.
+      </p>
+      <div class="drill-controls">
+        <label>Área:</label>
+        <select id="drillArea">
+          <option value="MT">Matemática</option>
+          <option value="LC">Linguagens</option>
+          <option value="CH">Ciências Humanas</option>
+          <option value="CN">Ciências da Natureza</option>
+        </select>
+
+        <label>Dimensão:</label>
+        <button class="chip active" data-by="uf">Por Estado (UF)</button>
+        <button class="chip" data-by="municipio">Por Município</button>
+        <button class="chip" data-by="escola">Por Escola</button>
+
+        <span class="chip" id="drillCount">—</span>
+
+        <button class="btn btn-ai" id="btnReport" style="margin-left:auto" disabled>
+          Gerar relatório IA (Claude)
+        </button>
+      </div>
+
+      <div class="drill-table-wrap">
+        <table class="drill" id="drillTable">
+          <thead><tr id="drillHead"></tr></thead>
+          <tbody id="drillBody"></tbody>
+        </table>
+      </div>
+      <div class="drill-status" id="drillStatus">Selecione uma área para carregar.</div>
+    </div>
   </div>
 
 </div>
 
-<footer>XTRI Engine — Microdata Analysis (Phase 8) | Plotly + INEP NU_NOTA</footer>
+<div class="modal-backdrop" id="reportModal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="reportTitle">Relatório IA</h3>
+      <button id="reportClose" title="Fechar">×</button>
+    </div>
+    <div class="modal-body" id="reportBody">
+      <div class="loading">Gerando com Claude… (pode levar 10–20 s)</div>
+    </div>
+    <div class="modal-foot">
+      <div class="meta" id="reportMeta">—</div>
+      <button class="download" id="reportDownload" disabled>Baixar .md</button>
+      <button class="close" id="reportCloseFoot">Fechar</button>
+    </div>
+  </div>
+</div>
+
+<footer>XTRI Engine — Microdata Analysis (Phase 8) | Plotly + INEP NU_NOTA · Relatórios por Claude</footer>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -254,6 +355,7 @@ $("#btnAnalisar").addEventListener("click", async () => {
         $("#btnAnalisar").disabled = false;
         $("#btnExcel").disabled = false;
         $("#btnCsv").disabled = false;
+        $("#btnReport").disabled = false;
       } else if (job.status === "error") {
         clearInterval(pollInterval);
         showError(job.error || "Erro desconhecido");
@@ -346,6 +448,9 @@ async function renderReport(ano) {
       }, 150);
     });
   }
+
+  // Kick off the drill-down with the default (MT + UF)
+  loadBreakdown();
 }
 
 function renderSummaryCard(area, s) {
@@ -535,6 +640,314 @@ $("#btnCsv").addEventListener("click", () => {
     "xtri_microdados_alunos_{year}.csv",
     "Gerando CSV…",
   );
+});
+
+// ── Drill-down: breakdown by UF / Município / Escola ──
+const drillState = {by: "uf", rows: [], sortKey: "median", sortDir: "desc"};
+
+const DRILL_COLUMNS = {
+  uf: [
+    {key: "label",        label: "UF",               align: "left",  fmt: v => v},
+    {key: "n",            label: "N",                              fmt: v => v.toLocaleString("pt-BR")},
+    {key: "mean",         label: "Média",                          fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "median",       label: "Mediana",                        fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "p25",          label: "P25",                            fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "p75",          label: "P75",                            fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "mean_acertos", label: "Acertos Médio",                  fmt: v => v != null ? v.toFixed(1) : "—"},
+  ],
+  municipio: [
+    {key: "label",        label: "Município",        align: "left",  fmt: v => v},
+    {key: "uf",           label: "UF",               align: "left",  fmt: v => v || "—"},
+    {key: "n",            label: "N",                              fmt: v => v.toLocaleString("pt-BR")},
+    {key: "mean",         label: "Média",                          fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "median",       label: "Mediana",                        fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "p25",          label: "P25",                            fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "p75",          label: "P75",                            fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "mean_acertos", label: "Acertos Médio",                  fmt: v => v != null ? v.toFixed(1) : "—"},
+  ],
+  escola: [
+    {key: "label",        label: "Cód. Escola",      align: "left",  fmt: v => v},
+    {key: "municipio",    label: "Município",        align: "left",  fmt: v => v || "—"},
+    {key: "uf",           label: "UF",               align: "left",  fmt: v => v || "—"},
+    {key: "dependencia",  label: "Rede",             align: "left",  fmt: v => v || "—"},
+    {key: "localizacao",  label: "Local",            align: "left",  fmt: v => v || "—"},
+    {key: "n",            label: "N",                              fmt: v => v.toLocaleString("pt-BR")},
+    {key: "mean",         label: "Média",                          fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "median",       label: "Mediana",                        fmt: v => v != null ? v.toFixed(1) : "—"},
+    {key: "mean_acertos", label: "Acertos Médio",                  fmt: v => v != null ? v.toFixed(1) : "—"},
+  ],
+};
+
+async function loadBreakdown() {
+  const ano = parseInt($("#ano").value, 10);
+  const area = $("#drillArea").value;
+  const by = drillState.by;
+  if (!ano) return;
+
+  $("#drillStatus").textContent = `Carregando ${area} / ${by}…`;
+  $("#drillCount").textContent = "…";
+  $("#drillBody").innerHTML = "";
+
+  try {
+    const r = await fetch(`/api/v5/microdata/breakdown/${ano}?area=${area}&by=${by}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({detail: "Falha"}));
+      throw new Error(err.detail || "Falha");
+    }
+    const d = await r.json();
+    drillState.rows = d.rows || [];
+    // Reset sort to median desc on each load
+    drillState.sortKey = "median";
+    drillState.sortDir = "desc";
+    renderDrillTable();
+    $("#drillCount").textContent = `${d.count} grupo${d.count === 1 ? "" : "s"}`;
+    $("#drillStatus").textContent = d.count === 0
+      ? `Nenhum grupo disponível (dados de ${by} podem estar ausentes para ${ano}).`
+      : `Ordenado por mediana decrescente. Amostra: ${ano}, área ${area}.`;
+  } catch (e) {
+    $("#drillStatus").textContent = `Erro: ${e.message}`;
+    $("#drillCount").textContent = "—";
+  }
+}
+
+function renderDrillTable() {
+  const cols = DRILL_COLUMNS[drillState.by];
+  // Header
+  const headHtml = cols.map(c => {
+    let cls = "";
+    if (c.key === drillState.sortKey) cls = drillState.sortDir === "asc" ? "sort-asc" : "sort-desc";
+    return `<th class="${cls}" data-key="${c.key}">${c.label}</th>`;
+  }).join("");
+  $("#drillHead").innerHTML = headHtml;
+
+  // Rows — sorted
+  const sorted = drillState.rows.slice().sort((a, b) => {
+    const va = a[drillState.sortKey];
+    const vb = b[drillState.sortKey];
+    // Nulls last
+    if (va == null && vb == null) return 0;
+    if (va == null) return 1;
+    if (vb == null) return -1;
+    let cmp;
+    if (typeof va === "number" && typeof vb === "number") {
+      cmp = va - vb;
+    } else {
+      cmp = String(va).localeCompare(String(vb), "pt-BR");
+    }
+    return drillState.sortDir === "asc" ? cmp : -cmp;
+  });
+
+  const bodyHtml = sorted.map(row => {
+    const cells = cols.map(c => {
+      const v = row[c.key];
+      const cls = c.align === "left" ? "text-left" : "";
+      return `<td class="${cls}">${v == null || v === "" ? "—" : c.fmt(v)}</td>`;
+    }).join("");
+    return `<tr>${cells}</tr>`;
+  }).join("");
+  $("#drillBody").innerHTML = bodyHtml;
+
+  // Wire header click-to-sort
+  document.querySelectorAll("#drillHead th").forEach(th => {
+    th.addEventListener("click", () => {
+      const key = th.dataset.key;
+      if (drillState.sortKey === key) {
+        drillState.sortDir = drillState.sortDir === "asc" ? "desc" : "asc";
+      } else {
+        drillState.sortKey = key;
+        drillState.sortDir = "desc";
+      }
+      renderDrillTable();
+    });
+  });
+}
+
+$("#drillArea").addEventListener("change", loadBreakdown);
+document.querySelectorAll(".drill-controls .chip[data-by]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".drill-controls .chip[data-by]").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    drillState.by = btn.dataset.by;
+    loadBreakdown();
+  });
+});
+
+// ── AI report modal (Claude narrative) ──
+let lastReport = null;
+
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+// Minimal markdown → HTML renderer. Supports headings, paragraphs, bold,
+// italic, inline code, unordered lists, ordered lists, and pipe tables.
+// Deliberately small — no need for a library because Claude's output is
+// predictable (we prompt for a structured response).
+function renderMarkdown(md) {
+  if (!md) return "";
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Table: header | header on this line, separator |---|--- next, then rows
+    if (
+      /^\s*\|.*\|\s*$/.test(line) &&
+      i + 1 < lines.length &&
+      /^\s*\|?[-: |]+\|[-: |]+\|?\s*$/.test(lines[i + 1])
+    ) {
+      const header = line.trim().replace(/^\||\|$/g, "").split("|").map(s => s.trim());
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        rows.push(lines[i].trim().replace(/^\||\|$/g, "").split("|").map(s => s.trim()));
+        i++;
+      }
+      let html = "<table><thead><tr>";
+      header.forEach(h => { html += `<th>${renderInline(h)}</th>`; });
+      html += "</tr></thead><tbody>";
+      rows.forEach(r => {
+        html += "<tr>";
+        r.forEach(c => { html += `<td>${renderInline(c)}</td>`; });
+        html += "</tr>";
+      });
+      html += "</tbody></table>";
+      out.push(html);
+      continue;
+    }
+    // Headings
+    const hMatch = line.match(/^(#{1,6})\s+(.+)$/);
+    if (hMatch) {
+      const lvl = hMatch[1].length;
+      out.push(`<h${lvl}>${renderInline(hMatch[2])}</h${lvl}>`);
+      i++;
+      continue;
+    }
+    // Unordered list
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*]\s+/, ""));
+        i++;
+      }
+      out.push("<ul>" + items.map(it => `<li>${renderInline(it)}</li>`).join("") + "</ul>");
+      continue;
+    }
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ""));
+        i++;
+      }
+      out.push("<ol>" + items.map(it => `<li>${renderInline(it)}</li>`).join("") + "</ol>");
+      continue;
+    }
+    // Paragraph (merge consecutive non-empty lines)
+    if (line.trim().length > 0) {
+      const buf = [line];
+      i++;
+      while (i < lines.length && lines[i].trim().length > 0 && !/^(#{1,6}\s|[-*]\s|\d+\.\s|\|)/.test(lines[i])) {
+        buf.push(lines[i]);
+        i++;
+      }
+      out.push(`<p>${renderInline(buf.join(" "))}</p>`);
+      continue;
+    }
+    i++;
+  }
+  return out.join("\n");
+}
+
+function renderInline(s) {
+  if (!s) return "";
+  let out = escapeHtml(s);
+  // **bold**
+  out = out.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  // *italic*
+  out = out.replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>");
+  // `code`
+  out = out.replace(/`([^`]+)`/g, "<code>$1</code>");
+  return out;
+}
+
+async function openReport() {
+  const ano = parseInt($("#ano").value, 10);
+  const area = $("#drillArea").value;
+  if (!ano || !area) return;
+
+  $("#reportTitle").textContent = `Relatório IA — ${area} (${ano})`;
+  $("#reportBody").innerHTML = `<div class="loading">Gerando com Claude… (normalmente 10–20 s)</div>`;
+  $("#reportMeta").textContent = "Modelo: claude-sonnet-4-6";
+  $("#reportDownload").disabled = true;
+  $("#reportModal").classList.add("active");
+
+  const t0 = Date.now();
+  try {
+    const r = await fetch(`/api/v5/microdata/report/${ano}?area=${area}`, {method: "POST"});
+    const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({detail: "Falha"}));
+      if (r.status === 501) {
+        $("#reportBody").innerHTML = `
+          <h2>IA indisponível</h2>
+          <p>O servidor não tem <code>ANTHROPIC_API_KEY</code> configurada.</p>
+          <p>Para habilitar relatórios automáticos:</p>
+          <ol>
+            <li>Adicione <code>ANTHROPIC_API_KEY=sk-ant-…</code> ao arquivo
+              <code>~/Library/Application Support/XTRI Engine/.env</code></li>
+            <li>Ou exporte no shell antes de iniciar o uvicorn</li>
+            <li>Reinicie o servidor</li>
+          </ol>
+          <p><small>Detalhe técnico: ${escapeHtml(err.detail || "")}</small></p>
+        `;
+      } else {
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      return;
+    }
+    const data = await r.json();
+    lastReport = data;
+    $("#reportBody").innerHTML = renderMarkdown(data.markdown);
+    const tokenInfo = (data.prompt_tokens && data.output_tokens)
+      ? ` · in=${data.prompt_tokens} out=${data.output_tokens} tokens`
+      : "";
+    $("#reportMeta").textContent = `Modelo: ${data.model} · ${elapsed}s${tokenInfo}`;
+    $("#reportDownload").disabled = false;
+  } catch (e) {
+    $("#reportBody").innerHTML = `<h2>Erro</h2><p>${escapeHtml(e.message)}</p>`;
+  }
+}
+
+function closeReport() {
+  $("#reportModal").classList.remove("active");
+}
+
+$("#btnReport").addEventListener("click", openReport);
+$("#reportClose").addEventListener("click", closeReport);
+$("#reportCloseFoot").addEventListener("click", closeReport);
+$("#reportModal").addEventListener("click", e => {
+  if (e.target.id === "reportModal") closeReport();
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") closeReport();
+});
+
+$("#reportDownload").addEventListener("click", () => {
+  if (!lastReport || !lastReport.markdown) return;
+  const blob = new Blob([lastReport.markdown], {type: "text/markdown;charset=utf-8"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `xtri_relatorio_ia_${lastReport.year}_${lastReport.area}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 });
 
 // Bootstrap

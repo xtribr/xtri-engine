@@ -1305,9 +1305,11 @@ from .microdata import (  # noqa: PLC0415
     build_microdata_excel,
     calibrate_all_areas,
     calibration_summary,
+    compute_breakdown,
     compute_dashboard_data,
     compute_difficulty_table,
     detect_schema,
+    generate_report,
     load_microdata,
     render_area_dashboard,
     render_full_report,
@@ -1613,6 +1615,84 @@ async def v5_microdata_dashboard_data(year: int, area: str):
     payload = compute_dashboard_data(df, area)
     payload["year"] = year
     return payload
+
+
+@app.get("/api/v5/microdata/breakdown/{year}")
+async def v5_microdata_breakdown(
+    year: int,
+    area: str,
+    by: str = "uf",
+    min_n: Optional[int] = None,
+    limit: Optional[int] = None,
+):
+    """Per-group INEP aggregation for the drill-down UI.
+
+    Query params:
+        area:  LC | CH | CN | MT
+        by:    uf | municipio | escola
+        min_n: drop groups with fewer students (default 1 for uf, 5 otherwise)
+        limit: max rows (default None for uf, 500 municipio, 1000 escola)
+
+    Returns a list of dicts sorted by median desc. Stats come exclusively from
+    the official ``NU_NOTA_*`` columns (``nota_ref_*``) — V3 is ignored.
+    """
+    area = area.upper()
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Invalid area: {area}")
+    by_lower = by.lower()
+    if by_lower not in ("uf", "municipio", "escola"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid by: {by} (must be uf, municipio, or escola)",
+        )
+    df, _ = _load_calibrated_or_404(year)
+    rows = compute_breakdown(
+        df, area, group_by=by_lower, min_n=min_n, limit=limit  # type: ignore[arg-type]
+    )
+    return {
+        "year": year,
+        "area": area,
+        "by": by_lower,
+        "count": len(rows),
+        "rows": rows,
+    }
+
+
+@app.post("/api/v5/microdata/report/{year}")
+async def v5_microdata_report(year: int, area: str):
+    """Generate a Claude-authored markdown narrative for one area of one year.
+
+    Assembles INEP summary stats + difficulty-table highlights + top-10 UFs,
+    cities and schools into a grounded prompt, then calls the Anthropic API
+    (model defaults to ``claude-sonnet-4-6``, overridable via ``XTRI_REPORT_MODEL``).
+
+    Requires ``ANTHROPIC_API_KEY`` to be set either in the environment or in
+    ``~/Library/Application Support/XTRI Engine/.env``. Returns ``501`` when
+    the key is missing so the frontend can show a clear fallback message.
+    """
+    area = area.upper()
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Invalid area: {area}")
+    df, _ = _load_calibrated_or_404(year)
+
+    try:
+        result = generate_report(df, year, area)
+    except RuntimeError as exc:
+        # Missing API key → 501 Not Implemented (feature unavailable)
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except ImportError as exc:
+        raise HTTPException(
+            status_code=501,
+            detail="anthropic package not installed in this build",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        import logging as _logging  # noqa: PLC0415
+        _logging.getLogger(__name__).exception("AI report generation failed")
+        raise HTTPException(
+            status_code=502, detail=f"Claude API call failed: {exc}"
+        ) from exc
+
+    return result
 
 
 @app.get("/api/v5/microdata/export-excel/{year}")
