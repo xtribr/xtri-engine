@@ -13,6 +13,8 @@ from app.main import app
 from app.microdata.cache import CACHE_ROOT, cache_key
 from app.microdata.jobs import job_manager
 from app.microdata.loader import default_csv_path
+from app.storage.artifacts import save_unidim_artifact
+from app.storage.model_registry import set_active_model
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -99,6 +101,62 @@ class TestPrepareAndJob:
         r = client.get("/api/v5/microdata/job/nonexistent-id-12345")
         assert r.status_code == 404
         assert "Unknown job_id" in r.json()["detail"]
+
+    @pytest.mark.api
+    def test_prepare_envia_pipeline_para_dispatcher_dedicado(self, client, tmp_path):
+        csv_path = tmp_path / "MICRODADOS_ENEM_2024.csv"
+        csv_path.write_text("NU_INSCRICAO,TP_PRESENCA_CN\n1,1\n", encoding="utf-8")
+
+        with mock.patch("app.main.default_csv_path", return_value=csv_path), mock.patch(
+            "app.main.submit_microdata_job"
+        ) as submit_mock:
+            r = client.post(
+                "/api/v5/microdata/prepare",
+                json={"year": 2024, "sample_size": 1234, "rng_seed": 99},
+            )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "queued"
+        submit_mock.assert_called_once()
+
+
+class TestRuntimeStatus:
+    @pytest.mark.api
+    def test_runtime_status_explica_fallback_sem_modelo(self, client, temp_model_storage):
+        r = client.get("/api/v5/runtime/status?ano_referencia=2024&simulado_id=sim-sem-modelo")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["app_support_dir"] == str(temp_model_storage)
+        assert data["directories"]["models"]["exists"] is True
+        assert data["status_areas"]["MT"] == "fallback_heuristico"
+
+    @pytest.mark.api
+    def test_runtime_status_lista_modelo_e_job(self, client, temp_model_storage):
+        manifest = save_unidim_artifact(
+            simulado_id="sim-modelo",
+            area="MT",
+            ano_referencia=2024,
+            c_fixo=0.20,
+            parametros_itens=[{"a": 1.2, "b": 0.3, "c": 0.2, "taxa_acerto": 0.55, "saturado": False}],
+            transformacao={"mu": 500.0, "sigma": 100.0, "metodo": "regressao_linear_lote"},
+            diagnostico={"n_alunos": 100, "n_itens": 45},
+            n_alunos=100,
+            n_itens=45,
+        )
+        set_active_model(manifest)
+
+        job = job_manager.create(year=2024, sample_size=1000, rng_seed=42)
+        job_manager.mark_running(job.job_id)
+
+        r = client.get("/api/v5/runtime/status?ano_referencia=2024&simulado_id=sim-modelo")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["job_counts"]["running"] >= 1
+        assert any(model["artifact_id"] == manifest["artifact_id"] for model in data["models"])
+        assert data["status_areas"]["MT"] == "pronto"
+        assert data["directories"]["cache_microdata"]["path"].endswith("/cache/microdata")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

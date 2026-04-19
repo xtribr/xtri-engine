@@ -11,7 +11,7 @@ For each area (LC, CH, CN, MT), this module:
    ``TX_RESPOSTAS_{area}`` against their own ``TX_GABARITO_{area}`` char-by-char.
 3. Feeds the matrix to :func:`app.motores.cientifico.pipeline_cientifico`, which
    calibrates item parameters (MML + L-BFGS-B), estimates per-student theta via
-   EAP, and anchors notas using the existing Cohort-Anchored Distribution method.
+   EAP, and anchors notas using the fixed-theta `MIN-MED-MAX` reference rule.
 4. Merges V3 Local results back into the original DataFrame alongside the
    official reference scores (``NU_NOTA_{area}``).
 
@@ -28,9 +28,9 @@ from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
-from scipy.optimize import minimize
 from scipy.stats import norm
 
+from app.irt.unidim_em import calibrar_itens_mml_em
 from app.microdata.schema import AREAS, MicrodataSchema
 from app.motores.cientifico import ancorar_notas, estado_tri
 from app.tabela_referencia import TabelaReferenciaTRI
@@ -47,96 +47,19 @@ MIN_CALIBRATION_SIZE = 500
 MIN_ITEMS_PER_STUDENT = 30
 
 
-def _neg_log_lik_item_fast(
-    params: np.ndarray,
-    n_correct: int,
-    n_wrong: int,
-    c: float,
-    theta_grid: np.ndarray,
-    weights: np.ndarray,
-) -> float:
-    """O(quadrature) marginal log-likelihood for a single item.
-
-    Mathematical equivalence to ``app.motores.cientifico._neg_log_lik_item``:
-
-    The original loops over each student's response and computes
-    ``log(sum(weights * lk))``, where ``lk`` is ``prob`` if the student got it
-    right or ``1 - prob`` otherwise. But each correct student contributes the
-    SAME ``log(sum(weights * prob))``, and each wrong student contributes
-    ``log(sum(weights * (1 - prob)))``. So the total reduces to::
-
-        ll_total = n_correct * log(marginal_correct)
-                 + n_wrong   * log(marginal_wrong)
-
-    This is independent of N_students, eliminating the per-student Python loop
-    that dominates calibration time on 10K+ student groups.
-    """
-    a, b = params
-    if a <= 0.01:
-        return 1e10
-    prob = c + (1 - c) / (1 + np.exp(-a * (theta_grid - b)))
-    prob = np.clip(prob, 1e-9, 1 - 1e-9)
-    marginal_correct = float(np.sum(weights * prob))
-    marginal_wrong = float(np.sum(weights * (1 - prob)))
-    ll = n_correct * np.log(marginal_correct + 1e-15) + n_wrong * np.log(
-        marginal_wrong + 1e-15
-    )
-    return -ll
-
-
 def calibrar_itens_fast(
     resp_matrix: np.ndarray,
     c: float = 0.20,
     n_quad: int = 41,
 ) -> list[dict[str, Any]]:
-    """Vectorized item calibration via MML + L-BFGS-B.
-
-    Mathematically equivalent to :func:`app.motores.cientifico.calibrar_itens`
-    but ~thousands of times faster on large student groups because the
-    likelihood evaluation no longer loops over individual students.
-
-    Args:
-        resp_matrix: ``(N_students, N_items)`` int array of 0/1 responses.
-        c: Fixed guessing parameter (0.20 for 5 alternatives).
-        n_quad: Number of quadrature points (matches the original).
-
-    Returns:
-        List of N_items dicts ``{a, b, c, taxa_acerto, saturado}``.
     """
-    theta_grid = np.linspace(-4, 4, n_quad)
-    weights = norm.pdf(theta_grid, 0, 1)
-    weights /= weights.sum()
+    Wrapper do estimador conjunto usado no motor principal.
 
-    params: list[dict[str, Any]] = []
-    n_students = resp_matrix.shape[0]
-    for j in range(resp_matrix.shape[1]):
-        responses = resp_matrix[:, j]
-        n_correct = int(responses.sum())
-        n_wrong = n_students - n_correct
+    O nome `fast` foi mantido para preservar o contrato do módulo de microdados,
+    mas a implementação agora delega para a calibração conjunta em chunks.
+    """
 
-        # Initial b from observed difficulty (same as cientifico.calibrar_itens).
-        p_obs = float(np.clip(responses.mean(), c + 0.01, 0.99))
-        b_init = -np.log((1 - c) / (p_obs - c) - 1) if p_obs > c else 2.0
-
-        res = minimize(
-            _neg_log_lik_item_fast,
-            x0=[1.0, b_init],
-            args=(n_correct, n_wrong, c, theta_grid, weights),
-            method="L-BFGS-B",
-            bounds=[(0.3, 4.0), (-4.0, 4.0)],
-            options={"maxiter": 500, "ftol": 1e-9},
-        )
-        a_est, b_est = res.x
-        params.append(
-            {
-                "a": round(float(a_est), 4),
-                "b": round(float(b_est), 4),
-                "c": c,
-                "taxa_acerto": round(float(responses.mean()), 4),
-                "saturado": b_est >= 3.9,
-            }
-        )
-    return params
+    return calibrar_itens_mml_em(resp_matrix, c=c, n_quad=n_quad)
 
 
 def eap_theta_batch(

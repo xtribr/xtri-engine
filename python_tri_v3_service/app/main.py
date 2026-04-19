@@ -12,9 +12,11 @@
 ╚════════════════════════════════════════════════════════════════════════════════╝
 """
 
+import csv
 import io
 import os
 import sys
+import tempfile
 import time
 import traceback
 import numpy as np
@@ -50,6 +52,8 @@ from .models import (
     ResultadoAlunoCientifico,
     RequestEstimarTheta,
     ResponseEstimarTheta,
+    RequestEstimarThetaMIRT,
+    ResponseEstimarThetaMIRT,
     DiagnosticoArea,
     PontoReferencia,
     ResultadoAlunoFrontend,
@@ -74,6 +78,10 @@ from .models import (
     MicrodataDifficultyRow,
     MicrodataAreaDashboardResponse,
     MicrodataFullReportResponse,
+    RuntimeDirectoryStatus,
+    RuntimeModelStatus,
+    RuntimeJobStatus,
+    RuntimeDesktopStatusResponse,
 )
 from .tabela_referencia import TabelaReferenciaTRI
 from .csv_parser import parse_single_area
@@ -84,12 +92,32 @@ from .motores.cientifico import (
     eap_theta as eap_theta_cientifico,
     estado_tri,
 )
+from .irt.transform import ancorar_nota_individual
 from .db.supabase_client import get_supabase, is_supabase_configured
 from .enriquecimento import (
     build_resultado_estruturado,
     build_metodologia_banner,
     build_coorte_stats,
     NACIONAL_STATS,
+)
+from .storage.artifacts import save_unidim_artifact
+from .storage.model_registry import get_active_model, list_active_models, set_active_model
+from .runtime.local_paths import describe_runtime_layout, ensure_app_support_layout
+from .runtime.unidim import (
+    RuntimeArtifactAmbiguousError,
+    RuntimeArtifactNotFoundError,
+    resolve_unidim_artifact,
+)
+from .runtime.mirt import (
+    RuntimeMIRTArtifactAmbiguousError,
+    RuntimeMIRTArtifactError,
+    RuntimeMIRTArtifactNotFoundError,
+    resolve_mirt_artifact,
+)
+from .mirt.runner import (
+    MIRTWorkerExecutionError,
+    mirt_runtime_available,
+    run_mirt_score,
 )
 
 
@@ -105,9 +133,16 @@ tabelas_multiano: Dict[int, TabelaReferenciaTRI] = {}
 async def lifespan(app: FastAPI):
     """Carrega a tabela de referência na inicialização."""
     global tabela, tabelas_multiano
+    ensure_app_support_layout()
     print("=" * 80)
     print("  XTRI ENGINE API — TRI V3 (FastAPI)")
     print("=" * 80)
+
+    try:
+        restored_jobs = job_manager.reload_from_disk()
+        print(f"  Jobs restaurados do disco: {restored_jobs}")
+    except Exception as e:
+        print(f"  AVISO: jobs locais não restaurados: {e}")
 
     try:
         tabela = TabelaReferenciaTRI()
@@ -407,6 +442,28 @@ async def calibrar_cientifico(payload: RequestCalibrarCientifico):
             for r in resultado['resultados_alunos']
         ]
 
+        diagnostico = dict(resultado["diagnostico"])
+        try:
+            manifesto = save_unidim_artifact(
+                simulado_id=payload.simulado_id,
+                area=area,
+                ano_referencia=payload.ano_referencia,
+                c_fixo=payload.c_fixo,
+                parametros_itens=resultado["parametros_itens"],
+                transformacao=resultado["transformacao"],
+                diagnostico=diagnostico,
+                n_alunos=len(payload.alunos),
+                n_itens=n_itens_esperado,
+            )
+            ativo = set_active_model(manifesto)
+            diagnostico["artefato_persistido"] = True
+            diagnostico["artefato_id"] = manifesto["artifact_id"]
+            diagnostico["artefato_dir"] = manifesto["artifact_dir"]
+            diagnostico["registry_modelo"] = ativo["modelo"]
+        except Exception as storage_exc:
+            diagnostico["artefato_persistido"] = False
+            diagnostico["artefato_erro"] = str(storage_exc)
+
         return ResponseCalibrarCientifico(
             status="sucesso",
             simulado_id=payload.simulado_id,
@@ -415,7 +472,9 @@ async def calibrar_cientifico(payload: RequestCalibrarCientifico):
             n_itens=n_itens_esperado,
             parametros_itens=parametros,
             resultados_alunos=resultados_alunos,
-            diagnostico=resultado['diagnostico'],
+            transformacao=resultado.get("transformacao"),
+            artefato_id=diagnostico.get("artefato_id"),
+            diagnostico=diagnostico,
         )
 
     except Exception as e:
@@ -451,26 +510,324 @@ async def estimar_theta(payload: RequestEstimarTheta):
             detail=f"Área inválida: {area}"
         )
 
-    if len(payload.respostas) != len(payload.parametros_itens):
+    params = None
+    artefato_id = None
+    transformacao = payload.transformacao
+
+    if payload.parametros_itens:
+        params = [
+            {'a': p.a, 'b': p.b, 'c': p.c}
+            for p in payload.parametros_itens
+        ]
+    else:
+        try:
+            artefato = resolve_unidim_artifact(
+                ano_referencia=payload.ano_referencia,
+                area=area,
+                artifact_id=payload.artefato_id,
+                scope_id=payload.simulado_id,
+            )
+        except RuntimeArtifactNotFoundError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Envie `parametros_itens` ou informe `simulado_id`/`artefato_id` "
+                    f"de um modelo local salvo. {exc}"
+                ),
+            )
+        except RuntimeArtifactAmbiguousError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+
+        params = [
+            {'a': p['a'], 'b': p['b'], 'c': p.get('c', 0.20)}
+            for p in artefato["parametros_itens"]
+        ]
+        if transformacao is None:
+            transformacao = artefato.get("transformacao")
+        artefato_id = artefato["manifest"]["artifact_id"]
+
+    if len(payload.respostas) != len(params):
         raise HTTPException(
             status_code=400,
-            detail=f"Número de respostas ({len(payload.respostas)}) != número de itens ({len(payload.parametros_itens)})"
+            detail=f"Número de respostas ({len(payload.respostas)}) != número de itens ({len(params)})"
         )
 
-    # Converter parâmetros para formato do motor
-    params = [
-        {'a': p.a, 'b': p.b, 'c': p.c}
-        for p in payload.parametros_itens
-    ]
+    if transformacao is None and is_supabase_configured():
+        try:
+            sb = get_supabase()
+            tr = (
+                sb.table("enem_transformacoes")
+                .select("sigma,mu")
+                .eq("ano", payload.ano_referencia)
+                .eq("area", area)
+                .limit(1)
+                .execute()
+            )
+            if tr.data:
+                transformacao = {
+                    "sigma": float(tr.data[0]["sigma"]),
+                    "mu": float(tr.data[0]["mu"]),
+                }
+        except Exception:
+            transformacao = None
 
     resultado = estimar_theta_individual(
         respostas=payload.respostas,
         parametros_itens=params,
         area=area,
         tabela=tabela,
+        transformacao=transformacao,
     )
 
-    return ResponseEstimarTheta(**resultado)
+    return ResponseEstimarTheta(**resultado, artefato_id=artefato_id)
+
+
+def _resolve_transformacao_supabase(
+    *,
+    ano_referencia: int,
+    area: str,
+) -> Optional[Dict[str, float]]:
+    """Busca a transformação `theta -> nota` no Supabase quando disponível."""
+
+    if not is_supabase_configured():
+        return None
+
+    try:
+        sb = get_supabase()
+        tr = (
+            sb.table("enem_transformacoes")
+            .select("sigma,mu")
+            .eq("ano", ano_referencia)
+            .eq("area", area)
+            .limit(1)
+            .execute()
+        )
+        if tr.data:
+            return {
+                "sigma": float(tr.data[0]["sigma"]),
+                "mu": float(tr.data[0]["mu"]),
+            }
+    except Exception:
+        return None
+
+    return None
+
+
+def _build_mirt_response(
+    *,
+    respostas: list[int],
+    area: str,
+    ano_referencia: int,
+    artefato_id: str,
+    scoring_factor_id: str,
+    scores_mirt: Dict[str, float],
+    se_mirt: Dict[str, float],
+    transformacao: Optional[Dict[str, float]],
+) -> ResponseEstimarThetaMIRT:
+    """Normaliza o output multidimensional para o contrato HTTP do backend."""
+
+    if scoring_factor_id not in scores_mirt:
+        raise RuntimeMIRTArtifactError(
+            f"O fator principal {scoring_factor_id} não foi retornado pelo scoring MIRT."
+        )
+    if scoring_factor_id not in se_mirt:
+        raise RuntimeMIRTArtifactError(
+            f"O erro padrão do fator principal {scoring_factor_id} não foi retornado pelo scoring MIRT."
+        )
+
+    acertos = int(sum(respostas))
+    theta = float(scores_mirt[scoring_factor_id])
+    se = float(se_mirt[scoring_factor_id])
+
+    nota = ancorar_nota_individual(
+        theta=theta,
+        area=area,
+        acertos=acertos,
+        tabela=tabela,
+        transformacao=transformacao,
+    )
+
+    return ResponseEstimarThetaMIRT(
+        acertos=acertos,
+        theta=round(theta, 6),
+        se=round(se, 4),
+        nota_ancorada=round(float(nota), 1),
+        estado_tri=estado_tri(nota),
+        artefato_id=artefato_id,
+        modelo_usado="mirt",
+        fallback_modelo=None,
+        scores_mirt={factor_id: round(float(value), 6) for factor_id, value in scores_mirt.items()},
+        se_mirt={factor_id: round(float(value), 4) for factor_id, value in se_mirt.items()},
+    )
+
+
+def _resolve_unidim_fallback_response(
+    *,
+    payload: RequestEstimarThetaMIRT,
+    area: str,
+    fallback_from: str,
+) -> ResponseEstimarThetaMIRT:
+    """Reaproveita o fluxo unidimensional atual para o fallback do MIRT."""
+
+    artefato = resolve_unidim_artifact(
+        ano_referencia=payload.ano_referencia,
+        area=area,
+        scope_id=payload.simulado_id,
+    )
+    params = [
+        {"a": p["a"], "b": p["b"], "c": p.get("c", 0.20)}
+        for p in artefato["parametros_itens"]
+    ]
+    if len(payload.respostas) != len(params):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Número de respostas ({len(payload.respostas)}) != número de itens "
+                f"do fallback unidimensional ({len(params)})"
+            ),
+        )
+    transformacao = payload.transformacao
+    if transformacao is None:
+        transformacao = artefato.get("transformacao")
+    if transformacao is None:
+        transformacao = _resolve_transformacao_supabase(
+            ano_referencia=payload.ano_referencia,
+            area=area,
+        )
+
+    resultado = estimar_theta_individual(
+        respostas=payload.respostas,
+        parametros_itens=params,
+        area=area,
+        tabela=tabela,
+        transformacao=transformacao,
+    )
+    return ResponseEstimarThetaMIRT(
+        **resultado,
+        artefato_id=artefato["manifest"]["artifact_id"],
+        modelo_usado="unidim",
+        fallback_modelo=fallback_from,
+        scores_mirt=None,
+        se_mirt=None,
+    )
+
+
+def _try_mirt_score(
+    *,
+    payload: RequestEstimarThetaMIRT,
+    area: str,
+) -> ResponseEstimarThetaMIRT:
+    """Executa o fluxo de score MIRT a partir de um artefato já calibrado."""
+
+    artefato = resolve_mirt_artifact(
+        ano_referencia=payload.ano_referencia,
+        area=area,
+        artifact_id=payload.artefato_id,
+        scope_id=payload.simulado_id,
+    )
+    qmatrix_rows = artefato["qmatrix"]["rows"]
+    item_ids = [row["item_id"] for row in qmatrix_rows]
+    if len(payload.respostas) != len(item_ids):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Número de respostas ({len(payload.respostas)}) != número de itens "
+                f"na Q-matrix ({len(item_ids)})"
+            ),
+        )
+
+    if not mirt_runtime_available():
+        raise MIRTWorkerExecutionError("`Rscript` não está disponível no runtime local.")
+
+    with tempfile.TemporaryDirectory(prefix="xtri_mirt_score_") as tmpdir:
+        input_path = Path(tmpdir) / "single_student.csv"
+        output_path = Path(tmpdir) / "scores.csv"
+
+        with open(input_path, "w", encoding="utf-8", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["student_id", *item_ids])
+            writer.writerow(["student_1", *payload.respostas])
+
+        run_mirt_score(
+            model_rds_path=artefato["model_rds_path"],
+            response_matrix_path=input_path,
+            output_path=output_path,
+        )
+
+        with open(output_path, "r", encoding="utf-8", newline="") as handle:
+            reader = csv.DictReader(handle)
+            row = next(reader, None)
+        if row is None:
+            raise RuntimeMIRTArtifactError("O scoring MIRT não retornou nenhuma linha.")
+
+    scores_mirt: Dict[str, float] = {}
+    se_mirt: Dict[str, float] = {}
+    for column, raw_value in row.items():
+        if column == "student_id" or raw_value in (None, ""):
+            continue
+        value = float(raw_value)
+        if column.startswith("SE_"):
+            se_mirt[column[3:]] = value
+        else:
+            scores_mirt[column] = value
+
+    transformacao = payload.transformacao or _resolve_transformacao_supabase(
+        ano_referencia=payload.ano_referencia,
+        area=area,
+    )
+    scoring_factor_id = artefato["worker_output"]["model_spec"]["scoring_factor_id"]
+    return _build_mirt_response(
+        respostas=payload.respostas,
+        area=area,
+        ano_referencia=payload.ano_referencia,
+        artefato_id=artefato["manifest"]["artifact_id"],
+        scoring_factor_id=scoring_factor_id,
+        scores_mirt=scores_mirt,
+        se_mirt=se_mirt,
+        transformacao=transformacao,
+    )
+
+
+@app.post("/api/v5/mirt/estimar-theta", response_model=ResponseEstimarThetaMIRT)
+async def estimar_theta_mirt(payload: RequestEstimarThetaMIRT):
+    """Estima score multidimensional a partir de artefatos MIRT locais."""
+
+    if tabela is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Tabela de referência TRI não carregada",
+        )
+
+    area = payload.area.upper()
+    if area not in ["LC", "CH", "CN", "MT"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Área inválida: {area}",
+        )
+
+    try:
+        return _try_mirt_score(payload=payload, area=area)
+    except HTTPException:
+        raise
+    except (
+        RuntimeMIRTArtifactNotFoundError,
+        RuntimeMIRTArtifactAmbiguousError,
+        RuntimeMIRTArtifactError,
+        MIRTWorkerExecutionError,
+    ) as exc:
+        if not payload.permitir_fallback_unidim:
+            raise HTTPException(status_code=400, detail=str(exc))
+        try:
+            return _resolve_unidim_fallback_response(
+                payload=payload,
+                area=area,
+                fallback_from="mirt",
+            )
+        except (RuntimeArtifactNotFoundError, RuntimeArtifactAmbiguousError) as fallback_exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{exc} Nenhum fallback unidimensional disponível: {fallback_exc}",
+            )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -1297,9 +1654,9 @@ async def validar_simulado(
 # a long-running pipeline via POST /prepare, polls /job/{id} for status, then
 # fetches base64-encoded PNG dashboards once status==done.
 
-import asyncio  # noqa: PLC0415
 import base64  # noqa: PLC0415
 
+from .jobs.calibration_jobs import submit_microdata_job  # noqa: PLC0415
 from .microdata import (  # noqa: PLC0415
     build_microdata_csv,
     build_microdata_excel,
@@ -1323,6 +1680,7 @@ from .microdata.cache import (  # noqa: PLC0415
 from .microdata.jobs import (  # noqa: PLC0415
     JOB_DONE,
     JOB_ERROR,
+    JOB_QUEUED,
     JOB_RUNNING,
     job_manager,
 )
@@ -1332,6 +1690,96 @@ from .microdata.loader import (  # noqa: PLC0415
     load_primeira_aplicacao_provas,
     MICRODATA_DIR,
 )
+
+
+def _runtime_directory_models() -> dict[str, RuntimeDirectoryStatus]:
+    """Normaliza o snapshot de diretórios locais para o response model."""
+
+    snapshot = describe_runtime_layout()
+    return {
+        name: RuntimeDirectoryStatus(**payload)
+        for name, payload in snapshot.items()
+    }
+
+
+def _runtime_job_counts(jobs: list) -> dict[str, int]:
+    """Conta jobs por status para o desktop não depender de lógica no cliente."""
+
+    counts = {
+        "queued": 0,
+        "running": 0,
+        "done": 0,
+        "error": 0,
+    }
+    for job in jobs:
+        counts[job.status] = counts.get(job.status, 0) + 1
+    return counts
+
+
+def _runtime_model_statuses() -> list[RuntimeModelStatus]:
+    """Converte o registry bruto em uma lista ordenada de modelos ativos."""
+
+    models: list[RuntimeModelStatus] = []
+    for entry in list_active_models().values():
+        artifact_dir = Path(entry["artifact_dir"])
+        status = "pronto" if artifact_dir.is_dir() else "desatualizado"
+        models.append(
+            RuntimeModelStatus(
+                ano_referencia=int(entry["ano_referencia"]),
+                area=str(entry["area"]),
+                scope_id=str(entry["scope_id"]),
+                modelo=str(entry["modelo"]),
+                artifact_id=entry.get("artifact_id"),
+                artifact_dir=str(artifact_dir),
+                saved_at_utc=entry.get("saved_at_utc"),
+                status=status,
+            )
+        )
+    return sorted(
+        models,
+        key=lambda model: (
+            model.ano_referencia,
+            model.area,
+            model.scope_id,
+            model.saved_at_utc or "",
+        ),
+        reverse=True,
+    )
+
+
+def _runtime_area_status(
+    *,
+    ano_referencia: int,
+    simulado_id: Optional[str],
+    jobs: list,
+) -> dict[str, str]:
+    """Deriva o status operacional por área para o desktop."""
+
+    if not simulado_id:
+        return {}
+
+    has_running = any(job.status in {JOB_QUEUED, JOB_RUNNING} for job in jobs)
+    has_error = any(job.status == JOB_ERROR for job in jobs)
+    statuses: dict[str, str] = {}
+
+    for area in ("LC", "CH", "CN", "MT"):
+        active = get_active_model(
+            ano_referencia=ano_referencia,
+            area=area,
+            scope_id=simulado_id,
+        )
+        if active is not None:
+            statuses[area] = (
+                "pronto" if Path(active["artifact_dir"]).is_dir() else "desatualizado"
+            )
+        elif has_running:
+            statuses[area] = "calibrando"
+        elif has_error:
+            statuses[area] = "falhou"
+        else:
+            statuses[area] = "fallback_heuristico"
+
+    return statuses
 
 
 def _run_microdata_pipeline(
@@ -1492,16 +1940,14 @@ async def v5_microdata_prepare(req: MicrodataPrepareRequest):
         year=req.year, sample_size=req.sample_size, rng_seed=req.rng_seed
     )
 
-    # Offload the heavy work to a worker thread so we don't block uvicorn.
-    loop = asyncio.get_event_loop()
-    loop.run_in_executor(
-        None,
+    # Enfileirar no executor dedicado do runtime local.
+    submit_microdata_job(
         _run_microdata_pipeline,
-        job.job_id,
-        req.year,
-        req.sample_size,
-        req.rng_seed,
-        req.force_rerun,
+        job_id=job.job_id,
+        year=req.year,
+        sample_size=req.sample_size,
+        rng_seed=req.rng_seed,
+        force_rerun=req.force_rerun,
     )
 
     return MicrodataPrepareResponse(
@@ -1525,6 +1971,46 @@ async def v5_microdata_job(job_id: str):
         started_at=job.started_at,
         elapsed_seconds=job.elapsed_seconds,
         error=job.error,
+    )
+
+
+@app.get("/api/v5/runtime/status", response_model=RuntimeDesktopStatusResponse)
+async def v5_runtime_status(
+    ano_referencia: int = 2024,
+    simulado_id: Optional[str] = None,
+):
+    """Snapshot do runtime local para o desktop/WebView."""
+
+    ensure_app_support_layout()
+    jobs = job_manager.snapshot()
+    directories = _runtime_directory_models()
+
+    return RuntimeDesktopStatusResponse(
+        app_support_dir=directories["app_support"].path,
+        directories=directories,
+        models=_runtime_model_statuses(),
+        job_counts=_runtime_job_counts(jobs),
+        jobs=[
+            RuntimeJobStatus(
+                job_id=job.job_id,
+                year=job.year,
+                sample_size=job.sample_size,
+                rng_seed=job.rng_seed,
+                status=job.status,
+                progress=job.progress,
+                stage=job.stage,
+                elapsed_seconds=job.elapsed_seconds,
+                error=job.error,
+            )
+            for job in jobs
+        ],
+        ano_referencia=ano_referencia,
+        simulado_id=simulado_id,
+        status_areas=_runtime_area_status(
+            ano_referencia=ano_referencia,
+            simulado_id=simulado_id,
+            jobs=jobs,
+        ),
     )
 
 
@@ -1790,242 +2276,546 @@ async def v5_microdata_export_csv(year: int):
 # ENDPOINT — EXPORTAR EXCEL
 # ════════════════════════════════════════════════════════════════════════════════
 
-@app.post("/api/v3/exportar-excel")
-async def exportar_excel(payload: Dict[str, Any] = Body(...)):
-    """
-    Generate an XLSX file with all results: students, difficulty table,
-    diagnostics, and the anchor chart as an embedded image.
+def _downloads_export_root() -> Path:
+    """Diretório visível ao usuário para exportações geradas localmente."""
 
-    Expected payload:
-      {
-        "area": "MT",
-        "ano_referencia": 2022,
-        "metodo": "Rank Intragrupo (Primi)",
-        "n_alunos": 403,
-        "resultados": [{aluno_id, acertos_mt, theta_mt, nota_mt, acert_dif_mt, estado_mt}],
-        "referencia": [{acertos, tri_min, tri_med, tri_max}],
-        "diagnosticos": [{...}],
-        "chart_png_base64": "iVBORw0KG..." (optional)
-      }
-    """
+    export_root = Path.home() / "Downloads" / "XTRI Engine"
+    export_root.mkdir(parents=True, exist_ok=True)
+    return export_root
+
+
+def _save_local_export(filename: str, payload: bytes) -> dict[str, Any]:
+    """Salva um arquivo de exportação em Downloads e retorna o metadata básico."""
+
+    destination = _downloads_export_root() / filename
+    destination.write_bytes(payload)
+    return {
+        "status": "sucesso",
+        "nome_arquivo": destination.name,
+        "caminho": str(destination),
+        "bytes": len(payload),
+    }
+
+
+def _build_resultados_csv_bytes(payload: Dict[str, Any]) -> tuple[bytes, str]:
+    """Gera o CSV do motor principal com BOM para abrir corretamente no Excel."""
+
+    from datetime import datetime
+
+    area = str(payload.get("area", "")).upper()
+    ano = int(payload.get("ano_referencia", 0) or 0)
+    resultados = payload.get("resultados", [])
+    if not area or not isinstance(resultados, list):
+        raise ValueError("Payload inválido para exportação CSV")
+
+    area_lower = area.lower()
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(["ID", "Acertos", "Theta", "Nota_TRI", "Pct_Dificeis", "Nivel"])
+    for row in resultados:
+        writer.writerow(
+            [
+                row.get("aluno_id", ""),
+                row.get(f"acertos_{area_lower}", ""),
+                row.get(f"theta_{area_lower}", ""),
+                row.get(f"nota_{area_lower}", ""),
+                row.get(f"acert_dif_{area_lower}", ""),
+                row.get(f"estado_{area_lower}", ""),
+            ]
+        )
+
+    csv_bytes = ("\ufeff" + buffer.getvalue()).encode("utf-8")
+    filename = f"xtri_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return csv_bytes, filename
+
+
+def _build_resultados_excel_bytes(payload: Dict[str, Any]) -> tuple[bytes, str]:
+    """Gera o XLSX do motor principal para streaming ou save local."""
+
     import base64
-    import io
     from datetime import datetime
 
     from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
-    from openpyxl.utils import get_column_letter
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-    try:
-        area = payload.get("area", "").upper()
-        ano = payload.get("ano_referencia", 0)
-        metodo = payload.get("metodo", "")
-        n_alunos = payload.get("n_alunos", 0)
-        resultados = payload.get("resultados", [])
-        referencia = payload.get("referencia", [])
-        diagnosticos = payload.get("diagnosticos", [])
-        chart_b64 = payload.get("chart_png_base64", "")
+    area = payload.get("area", "").upper()
+    ano = payload.get("ano_referencia", 0)
+    metodo = payload.get("metodo", "")
+    n_alunos = payload.get("n_alunos", 0)
+    resultados = payload.get("resultados", [])
+    referencia = payload.get("referencia", [])
+    diagnosticos = payload.get("diagnosticos", [])
+    chart_b64 = payload.get("chart_png_base64", "")
+    area_lower = area.lower()
 
-        area_lower = area.lower()
+    wb = Workbook()
 
-        wb = Workbook()
+    # Styles
+    header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    title_font = Font(bold=True, size=14, color="2C3E50")
+    subtitle_font = Font(italic=True, size=10, color="666666")
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center")
+    left = Alignment(horizontal="left", vertical="center")
 
-        # Styles
-        header_fill = PatternFill(start_color="2C3E50", end_color="2C3E50", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        title_font = Font(bold=True, size=14, color="2C3E50")
-        subtitle_font = Font(italic=True, size=10, color="666666")
-        thin = Side(border_style="thin", color="CCCCCC")
-        border = Border(left=thin, right=thin, top=thin, bottom=thin)
-        center = Alignment(horizontal="center", vertical="center")
-        left = Alignment(horizontal="left", vertical="center")
-        right = Alignment(horizontal="right", vertical="center")
+    # ═══ Sheet 1: RESUMO ═══
+    ws1 = wb.active
+    ws1.title = "Resumo"
+    ws1["A1"] = "XTRI ENGINE — Relatorio de Correcao TRI"
+    ws1["A1"].font = title_font
+    ws1.merge_cells("A1:D1")
+    ws1["A2"] = f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws1["A2"].font = subtitle_font
+    ws1.merge_cells("A2:D2")
 
-        # ═══ Sheet 1: RESUMO ═══
-        ws1 = wb.active
-        ws1.title = "Resumo"
-        ws1["A1"] = "XTRI ENGINE — Relatorio de Correcao TRI"
-        ws1["A1"].font = title_font
-        ws1.merge_cells("A1:D1")
-        ws1["A2"] = f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        ws1["A2"].font = subtitle_font
-        ws1.merge_cells("A2:D2")
+    ws1["A4"] = "Parametros da Correcao"
+    ws1["A4"].font = Font(bold=True, size=12, color="2C3E50")
+    params = [
+        ("Area", area),
+        ("Ano de Referencia ENEM", ano),
+        ("Metodo de Ancoragem", metodo),
+        ("Total de Alunos", n_alunos),
+    ]
+    for i, (k, v) in enumerate(params, start=5):
+        ws1[f"A{i}"] = k
+        ws1[f"A{i}"].font = Font(bold=True)
+        ws1[f"B{i}"] = v
 
-        ws1["A4"] = "Parametros da Correcao"
-        ws1["A4"].font = Font(bold=True, size=12, color="2C3E50")
-        params = [
-            ("Area", area),
-            ("Ano de Referencia ENEM", ano),
-            ("Metodo de Ancoragem", metodo),
-            ("Total de Alunos", n_alunos),
+    ws1["A10"] = "Estatisticas da Turma"
+    ws1["A10"].font = Font(bold=True, size=12, color="2C3E50")
+    if diagnosticos:
+        d = diagnosticos[0]
+        stats = [
+            ("Nota Media", d.get("nota_media", "")),
+            ("Nota Minima", d.get("nota_min", "")),
+            ("Nota Maxima", d.get("nota_max", "")),
+            ("b medio (dificuldade media)", d.get("b_medio", "")),
+            ("b desvio padrao", d.get("b_desvio", "")),
+            ("% dentro do intervalo ENEM", f"{d.get('pct_dentro_intervalo', 0)}%"),
+            ("Itens faceis (b < -1.5)", d.get("itens_faceis", 0)),
+            ("Itens medios", d.get("itens_medios", 0)),
+            ("Itens dificeis (b > 1.5)", d.get("itens_dificeis", 0)),
+            ("acert_dif medio (Primi)", d.get("acert_dif_medio", 0)),
         ]
-        for i, (k, v) in enumerate(params, start=5):
+        for i, (k, v) in enumerate(stats, start=11):
             ws1[f"A{i}"] = k
             ws1[f"A{i}"].font = Font(bold=True)
             ws1[f"B{i}"] = v
 
-        ws1["A10"] = "Estatisticas da Turma"
-        ws1["A10"].font = Font(bold=True, size=12, color="2C3E50")
+    niveis_count: Dict[str, int] = {}
+    for row in resultados:
+        estado = row.get(f"estado_{area_lower}")
+        if estado:
+            niveis_count[estado] = niveis_count.get(estado, 0) + 1
 
-        if diagnosticos:
-            d = diagnosticos[0]
-            stats = [
-                ("Nota Media", d.get("nota_media", "")),
-                ("Nota Minima", d.get("nota_min", "")),
-                ("Nota Maxima", d.get("nota_max", "")),
-                ("b medio (dificuldade media)", d.get("b_medio", "")),
-                ("b desvio padrao", d.get("b_desvio", "")),
-                ("% dentro do intervalo ENEM", f"{d.get('pct_dentro_intervalo', 0)}%"),
-                ("Itens faceis (b < -1.5)", d.get("itens_faceis", 0)),
-                ("Itens medios", d.get("itens_medios", 0)),
-                ("Itens dificeis (b > 1.5)", d.get("itens_dificeis", 0)),
-                ("acert_dif medio (Primi)", d.get("acert_dif_medio", 0)),
+    ws1["A23"] = "Distribuicao por Nivel Pedagogico"
+    ws1["A23"].font = Font(bold=True, size=12, color="2C3E50")
+    ordem = ["AVANCADO", "PROFICIENTE", "BASICO", "ELEMENTAR", "INICIANTE"]
+    for i, nivel in enumerate(ordem, start=24):
+        ws1[f"A{i}"] = nivel
+        ws1[f"A{i}"].font = Font(bold=True)
+        ws1[f"B{i}"] = niveis_count.get(nivel, 0)
+        if n_alunos > 0:
+            ws1[f"C{i}"] = f"{niveis_count.get(nivel, 0) / n_alunos * 100:.1f}%"
+
+    ws1.column_dimensions["A"].width = 35
+    ws1.column_dimensions["B"].width = 18
+    ws1.column_dimensions["C"].width = 12
+
+    # ═══ Sheet 2: ALUNOS ═══
+    ws2 = wb.create_sheet("Alunos")
+    headers = ["ID", "Acertos", "Theta", "Nota TRI", "% Dificeis (acert_dif)", "Nivel"]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws2.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+
+    for row_idx, row in enumerate(resultados, start=2):
+        ws2.cell(row=row_idx, column=1, value=row.get("aluno_id", ""))
+        ws2.cell(row=row_idx, column=2, value=row.get(f"acertos_{area_lower}"))
+        ws2.cell(row=row_idx, column=3, value=row.get(f"theta_{area_lower}"))
+        ws2.cell(row=row_idx, column=4, value=row.get(f"nota_{area_lower}"))
+        ws2.cell(row=row_idx, column=5, value=row.get(f"acert_dif_{area_lower}"))
+        ws2.cell(row=row_idx, column=6, value=row.get(f"estado_{area_lower}"))
+        for c in range(1, 7):
+            ws2.cell(row=row_idx, column=c).border = border
+            ws2.cell(row=row_idx, column=c).alignment = center if c > 1 else left
+
+    ws2.column_dimensions["A"].width = 28
+    ws2.column_dimensions["B"].width = 10
+    ws2.column_dimensions["C"].width = 12
+    ws2.column_dimensions["D"].width = 12
+    ws2.column_dimensions["E"].width = 22
+    ws2.column_dimensions["F"].width = 15
+    ws2.freeze_panes = "A2"
+
+    # ═══ Sheet 3: TABELA DIFICULDADES ═══
+    ws3 = wb.create_sheet("Tabela Dificuldades")
+    ws3["A1"] = f"Tabela de Dificuldades — {area} / ENEM {ano}"
+    ws3["A1"].font = title_font
+    ws3.merge_cells("A1:G1")
+    ws3["A2"] = "Comparacao entre a distribuicao do simulado e os limites oficiais ENEM"
+    ws3["A2"].font = subtitle_font
+    ws3.merge_cells("A2:G2")
+
+    from collections import defaultdict
+
+    freq_ac: Dict[int, int] = defaultdict(int)
+    notas_ac: Dict[int, list] = defaultdict(list)
+    for row in resultados:
+        acertos = row.get(f"acertos_{area_lower}")
+        nota = row.get(f"nota_{area_lower}")
+        if acertos is not None and nota is not None:
+            freq_ac[acertos] += 1
+            notas_ac[acertos].append(nota)
+
+    table_headers = [
+        "Acertos",
+        "Freq Simulado",
+        "Ref Min",
+        "Ref Med",
+        "Ref Max",
+        "Nota Sim (media)",
+        "Nota Sim (min-max)",
+    ]
+    for col_idx, header in enumerate(table_headers, start=1):
+        cell = ws3.cell(row=4, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+
+    for i, ponto in enumerate(referencia, start=5):
+        acertos = ponto["acertos"]
+        notas = notas_ac.get(acertos, [])
+        ws3.cell(row=i, column=1, value=acertos)
+        ws3.cell(row=i, column=2, value=freq_ac.get(acertos, 0))
+        ws3.cell(row=i, column=3, value=ponto["tri_min"])
+        ws3.cell(row=i, column=4, value=ponto["tri_med"])
+        ws3.cell(row=i, column=5, value=ponto["tri_max"])
+        if notas:
+            ws3.cell(row=i, column=6, value=round(sum(notas) / len(notas), 1))
+            ws3.cell(row=i, column=7, value=f"{min(notas):.0f} - {max(notas):.0f}")
+        for c in range(1, 8):
+            ws3.cell(row=i, column=c).border = border
+            ws3.cell(row=i, column=c).alignment = center
+
+    ws3.column_dimensions["A"].width = 10
+    ws3.column_dimensions["B"].width = 14
+    ws3.column_dimensions["C"].width = 12
+    ws3.column_dimensions["D"].width = 12
+    ws3.column_dimensions["E"].width = 12
+    ws3.column_dimensions["F"].width = 18
+    ws3.column_dimensions["G"].width = 20
+    ws3.freeze_panes = "A5"
+
+    # ═══ Sheet 4: GRAFICO (if chart image provided) ═══
+    if chart_b64:
+        try:
+            from openpyxl.drawing.image import Image as XLImage
+
+            if "," in chart_b64:
+                chart_b64 = chart_b64.split(",", 1)[1]
+            img_bytes = base64.b64decode(chart_b64)
+            img_stream = io.BytesIO(img_bytes)
+            ws4 = wb.create_sheet("Grafico")
+            ws4["A1"] = f"Grafico de Ancoragem — {area} / ENEM {ano}"
+            ws4["A1"].font = title_font
+            ws4.merge_cells("A1:H1")
+            xlimg = XLImage(img_stream)
+            xlimg.width = 900
+            xlimg.height = 520
+            ws4.add_image(xlimg, "A3")
+        except Exception as exc:  # noqa: BLE001
+            print(f"[EXCEL] Failed to embed chart image: {exc}")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    filename = f"xtri_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return buf.getvalue(), filename
+
+
+def _build_validator_csv_bytes(payload: Dict[str, Any]) -> tuple[bytes, str]:
+    """Gera o CSV da comparação V3 x V4 do validator."""
+
+    from datetime import datetime
+
+    area = str(payload.get("area", "")).upper()
+    ano = int(payload.get("ano", 0) or 0)
+    resultados = payload.get("resultados", [])
+    if not area or not isinstance(resultados, list):
+        raise ValueError("Payload inválido para exportação do validator")
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";")
+    writer.writerow(
+        [
+            "ID",
+            "Acertos",
+            "Theta_V3",
+            "Theta_V4",
+            "Nota_V3",
+            "Nota_V4",
+            "Diff",
+            "Estado_V3",
+            "Estado_V4",
+            "Match",
+        ]
+    )
+    for row in resultados:
+        writer.writerow(
+            [
+                row.get("aluno_id", ""),
+                row.get("acertos", ""),
+                row.get("theta_v3", ""),
+                row.get("theta_v4", ""),
+                row.get("nota_v3", ""),
+                row.get("nota_v4", ""),
+                row.get("diff", ""),
+                row.get("estado_v3", ""),
+                row.get("estado_v4", ""),
+                "SIM" if row.get("estado_v3") == row.get("estado_v4") else "NAO",
             ]
-            for i, (k, v) in enumerate(stats, start=11):
-                ws1[f"A{i}"] = k
-                ws1[f"A{i}"].font = Font(bold=True)
-                ws1[f"B{i}"] = v
-
-        # Classification counts
-        niveis_count: Dict[str, int] = {}
-        for r in resultados:
-            est = r.get(f"estado_{area_lower}")
-            if est:
-                niveis_count[est] = niveis_count.get(est, 0) + 1
-
-        ws1["A23"] = "Distribuicao por Nivel Pedagogico"
-        ws1["A23"].font = Font(bold=True, size=12, color="2C3E50")
-        ordem = ["AVANCADO", "PROFICIENTE", "BASICO", "ELEMENTAR", "INICIANTE"]
-        for i, nivel in enumerate(ordem, start=24):
-            ws1[f"A{i}"] = nivel
-            ws1[f"A{i}"].font = Font(bold=True)
-            ws1[f"B{i}"] = niveis_count.get(nivel, 0)
-            if n_alunos > 0:
-                ws1[f"C{i}"] = f"{niveis_count.get(nivel, 0) / n_alunos * 100:.1f}%"
-
-        ws1.column_dimensions["A"].width = 35
-        ws1.column_dimensions["B"].width = 18
-        ws1.column_dimensions["C"].width = 12
-
-        # ═══ Sheet 2: ALUNOS ═══
-        ws2 = wb.create_sheet("Alunos")
-        headers = ["ID", "Acertos", "Theta", "Nota TRI", "% Dificeis (acert_dif)", "Nivel"]
-        for col_idx, h in enumerate(headers, start=1):
-            cell = ws2.cell(row=1, column=col_idx, value=h)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = center
-            cell.border = border
-
-        for row_idx, r in enumerate(resultados, start=2):
-            ws2.cell(row=row_idx, column=1, value=r.get("aluno_id", ""))
-            ws2.cell(row=row_idx, column=2, value=r.get(f"acertos_{area_lower}"))
-            ws2.cell(row=row_idx, column=3, value=r.get(f"theta_{area_lower}"))
-            ws2.cell(row=row_idx, column=4, value=r.get(f"nota_{area_lower}"))
-            ws2.cell(row=row_idx, column=5, value=r.get(f"acert_dif_{area_lower}"))
-            ws2.cell(row=row_idx, column=6, value=r.get(f"estado_{area_lower}"))
-            for c in range(1, 7):
-                ws2.cell(row=row_idx, column=c).border = border
-                ws2.cell(row=row_idx, column=c).alignment = center if c > 1 else left
-
-        ws2.column_dimensions["A"].width = 15
-        ws2.column_dimensions["B"].width = 10
-        ws2.column_dimensions["C"].width = 12
-        ws2.column_dimensions["D"].width = 12
-        ws2.column_dimensions["E"].width = 22
-        ws2.column_dimensions["F"].width = 15
-        ws2.freeze_panes = "A2"
-
-        # ═══ Sheet 3: TABELA DIFICULDADES ═══
-        ws3 = wb.create_sheet("Tabela Dificuldades")
-        ws3["A1"] = f"Tabela de Dificuldades — {area} / ENEM {ano}"
-        ws3["A1"].font = title_font
-        ws3.merge_cells("A1:G1")
-        ws3["A2"] = "Comparacao entre a distribuicao do simulado e os limites oficiais ENEM"
-        ws3["A2"].font = subtitle_font
-        ws3.merge_cells("A2:G2")
-
-        from collections import defaultdict
-        freq_ac: Dict[int, int] = defaultdict(int)
-        notas_ac: Dict[int, list] = defaultdict(list)
-        for r in resultados:
-            ac = r.get(f"acertos_{area_lower}")
-            nota = r.get(f"nota_{area_lower}")
-            if ac is not None and nota is not None:
-                freq_ac[ac] += 1
-                notas_ac[ac].append(nota)
-
-        table_headers = ["Acertos", "Freq Simulado", "Ref Min", "Ref Med", "Ref Max", "Nota Sim (media)", "Nota Sim (min-max)"]
-        for col_idx, h in enumerate(table_headers, start=1):
-            cell = ws3.cell(row=4, column=col_idx, value=h)
-            cell.fill = header_fill
-            cell.font = header_font
-            cell.alignment = center
-            cell.border = border
-
-        for i, p in enumerate(referencia, start=5):
-            ac = p["acertos"]
-            f = freq_ac.get(ac, 0)
-            ns = notas_ac.get(ac, [])
-            ws3.cell(row=i, column=1, value=ac)
-            ws3.cell(row=i, column=2, value=f)
-            ws3.cell(row=i, column=3, value=p["tri_min"])
-            ws3.cell(row=i, column=4, value=p["tri_med"])
-            ws3.cell(row=i, column=5, value=p["tri_max"])
-            if ns:
-                avg = sum(ns) / len(ns)
-                ws3.cell(row=i, column=6, value=round(avg, 1))
-                ws3.cell(row=i, column=7, value=f"{min(ns):.0f} - {max(ns):.0f}")
-            for c in range(1, 8):
-                ws3.cell(row=i, column=c).border = border
-                ws3.cell(row=i, column=c).alignment = center
-
-        ws3.column_dimensions["A"].width = 10
-        ws3.column_dimensions["B"].width = 14
-        ws3.column_dimensions["C"].width = 12
-        ws3.column_dimensions["D"].width = 12
-        ws3.column_dimensions["E"].width = 12
-        ws3.column_dimensions["F"].width = 18
-        ws3.column_dimensions["G"].width = 20
-        ws3.freeze_panes = "A5"
-
-        # ═══ Sheet 4: GRAFICO (if chart image provided) ═══
-        if chart_b64:
-            try:
-                from openpyxl.drawing.image import Image as XLImage
-                # Strip data URL prefix if present
-                if "," in chart_b64:
-                    chart_b64 = chart_b64.split(",", 1)[1]
-                img_bytes = base64.b64decode(chart_b64)
-                img_stream = io.BytesIO(img_bytes)
-                ws4 = wb.create_sheet("Grafico")
-                ws4["A1"] = f"Grafico de Ancoragem — {area} / ENEM {ano}"
-                ws4["A1"].font = title_font
-                ws4.merge_cells("A1:H1")
-                xlimg = XLImage(img_stream)
-                # Resize to fit
-                xlimg.width = 900
-                xlimg.height = 520
-                ws4.add_image(xlimg, "A3")
-            except Exception as e:
-                print(f"[EXCEL] Failed to embed chart image: {e}")
-
-        # Save to bytes
-        buf = io.BytesIO()
-        wb.save(buf)
-        buf.seek(0)
-
-        filename = f"xtri_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-        return StreamingResponse(
-            buf,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
-    except Exception as e:
+    csv_bytes = ("\ufeff" + buffer.getvalue()).encode("utf-8")
+    filename = (
+        f"xtri_validator_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    )
+    return csv_bytes, filename
+
+
+def _build_validator_excel_bytes(payload: Dict[str, Any]) -> tuple[bytes, str]:
+    """Gera o XLSX da comparação V3 x V4 para uso no validator."""
+
+    from datetime import datetime
+
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+
+    area = str(payload.get("area", "")).upper()
+    ano = int(payload.get("ano", 0) or 0)
+    co_prova = str(payload.get("co_prova", ""))
+    estatisticas = payload.get("estatisticas", {}) or {}
+    transformacao = payload.get("transformacao_inep", {}) or {}
+    resultados = payload.get("resultados", []) or []
+    avisos = payload.get("avisos", []) or []
+
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Resumo"
+
+    header_fill = PatternFill(start_color="1E3C72", end_color="1E3C72", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF", size=11)
+    title_font = Font(bold=True, size=14, color="1E3C72")
+    subtitle_font = Font(italic=True, size=10, color="666666")
+    thin = Side(border_style="thin", color="CCCCCC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center")
+
+    ws1["A1"] = "XTRI Validator — Comparação V3 vs V4"
+    ws1["A1"].font = title_font
+    ws1.merge_cells("A1:D1")
+    ws1["A2"] = f"Gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    ws1["A2"].font = subtitle_font
+    ws1.merge_cells("A2:D2")
+
+    params = [
+        ("Ano ENEM", ano),
+        ("Área", area),
+        ("CO_PROVA", co_prova),
+        ("Alunos", estatisticas.get("n_alunos", len(resultados))),
+        ("Itens", payload.get("n_itens", "")),
+        ("Tempo (s)", payload.get("tempo_processamento", "")),
+    ]
+    ws1["A4"] = "Parâmetros"
+    ws1["A4"].font = Font(bold=True, size=12, color="1E3C72")
+    for i, (k, v) in enumerate(params, start=5):
+        ws1[f"A{i}"] = k
+        ws1[f"A{i}"].font = Font(bold=True)
+        ws1[f"B{i}"] = v
+
+    metrics = [
+        ("Correlação", estatisticas.get("correlacao", "")),
+        ("MAE", estatisticas.get("mae", "")),
+        ("RMSE", estatisticas.get("rmse", "")),
+        ("Max |diff|", estatisticas.get("max_diff_abs", "")),
+        ("Concordância de nível (%)", estatisticas.get("pct_concordancia_nivel", "")),
+        ("Média V3", estatisticas.get("nota_media_v3", "")),
+        ("Média V4", estatisticas.get("nota_media_v4", "")),
+        ("Sigma INEP", transformacao.get("sigma", "")),
+        ("Mu INEP", transformacao.get("mu", "")),
+    ]
+    ws1["A13"] = "Métricas"
+    ws1["A13"].font = Font(bold=True, size=12, color="1E3C72")
+    for i, (k, v) in enumerate(metrics, start=14):
+        ws1[f"A{i}"] = k
+        ws1[f"A{i}"].font = Font(bold=True)
+        ws1[f"B{i}"] = v
+
+    if avisos:
+        ws1["A25"] = "Avisos"
+        ws1["A25"].font = Font(bold=True, size=12, color="1E3C72")
+        for i, warning in enumerate(avisos, start=26):
+            ws1[f"A{i}"] = f"• {warning}"
+            ws1.merge_cells(start_row=i, start_column=1, end_row=i, end_column=4)
+
+    ws1.column_dimensions["A"].width = 34
+    ws1.column_dimensions["B"].width = 18
+    ws1.column_dimensions["C"].width = 12
+    ws1.column_dimensions["D"].width = 12
+
+    ws2 = wb.create_sheet("Comparacao")
+    headers = [
+        "ID",
+        "Acertos",
+        "Theta V3",
+        "Theta V4",
+        "Nota V3",
+        "Nota V4",
+        "Diff",
+        "Nivel V3",
+        "Nivel V4",
+        "Match",
+    ]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws2.cell(row=1, column=col_idx, value=header)
+        cell.fill = header_fill
+        cell.font = header_font
+        cell.alignment = center
+        cell.border = border
+
+    for row_idx, row in enumerate(resultados, start=2):
+        values = [
+            row.get("aluno_id", ""),
+            row.get("acertos", ""),
+            row.get("theta_v3", ""),
+            row.get("theta_v4", ""),
+            row.get("nota_v3", ""),
+            row.get("nota_v4", ""),
+            row.get("diff", ""),
+            row.get("estado_v3", ""),
+            row.get("estado_v4", ""),
+            "SIM" if row.get("estado_v3") == row.get("estado_v4") else "NAO",
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws2.cell(row=row_idx, column=col_idx, value=value)
+            cell.border = border
+            cell.alignment = center
+
+    for col in ("A", "B", "C", "D", "E", "F", "G", "H", "I", "J"):
+        ws2.column_dimensions[col].width = 16 if col != "A" else 28
+    ws2.freeze_panes = "A2"
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    filename = (
+        f"xtri_validator_{area}_{ano}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    )
+    return buf.getvalue(), filename
+
+
+@app.post("/api/v3/exportar-csv")
+async def exportar_csv(payload: Dict[str, Any] = Body(...), salvar_localmente: bool = False):
+    """Exporta o CSV do motor principal; no app local pode salvar em Downloads."""
+
+    try:
+        csv_bytes, filename = _build_resultados_csv_bytes(payload)
+        if salvar_localmente:
+            return JSONResponse(_save_local_export(filename, csv_bytes))
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(csv_bytes)),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_trace = traceback.format_exc()
+        print(f"[CSV] ERROR: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar CSV: {exc}")
+
+
+@app.post("/api/v3/exportar-excel")
+async def exportar_excel(payload: Dict[str, Any] = Body(...), salvar_localmente: bool = False):
+    """
+    Generate an XLSX file with all results: students, difficulty table,
+    diagnostics, and the anchor chart as an embedded image.
+
+    When ``salvar_localmente`` is true, writes the file to Downloads and
+    returns the destination path instead of streaming it through the WebView.
+    """
+    try:
+        xlsx_bytes, filename = _build_resultados_excel_bytes(payload)
+        if salvar_localmente:
+            return JSONResponse(_save_local_export(filename, xlsx_bytes))
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(xlsx_bytes)),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
         error_trace = traceback.format_exc()
         print(f"[EXCEL] ERROR: {error_trace}")
-        raise HTTPException(status_code=500, detail=f"Erro ao gerar Excel: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar Excel: {exc}")
+
+
+@app.post("/api/v4/enem/exportar-validacao-csv")
+async def exportar_validacao_csv(
+    payload: Dict[str, Any] = Body(...), salvar_localmente: bool = False
+):
+    """Exporta o comparativo do validator em CSV."""
+
+    try:
+        csv_bytes, filename = _build_validator_csv_bytes(payload)
+        if salvar_localmente:
+            return JSONResponse(_save_local_export(filename, csv_bytes))
+        return StreamingResponse(
+            io.BytesIO(csv_bytes),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(csv_bytes)),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_trace = traceback.format_exc()
+        print(f"[VALIDATOR CSV] ERROR: {error_trace}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar CSV do validator: {exc}")
+
+
+@app.post("/api/v4/enem/exportar-validacao-excel")
+async def exportar_validacao_excel(
+    payload: Dict[str, Any] = Body(...), salvar_localmente: bool = False
+):
+    """Exporta o comparativo do validator em XLSX."""
+
+    try:
+        xlsx_bytes, filename = _build_validator_excel_bytes(payload)
+        if salvar_localmente:
+            return JSONResponse(_save_local_export(filename, xlsx_bytes))
+        return StreamingResponse(
+            io.BytesIO(xlsx_bytes),
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(xlsx_bytes)),
+            },
+        )
+    except Exception as exc:  # noqa: BLE001
+        error_trace = traceback.format_exc()
+        print(f"[VALIDATOR EXCEL] ERROR: {error_trace}")
+        raise HTTPException(
+            status_code=500, detail=f"Erro ao gerar Excel do validator: {exc}"
+        )
 
 
 # ════════════════════════════════════════════════════════════════════════════════

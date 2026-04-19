@@ -107,6 +107,35 @@ class TestCalibrarItens:
         for p in params:
             assert 0.0 <= p["taxa_acerto"] <= 1.0
 
+    @pytest.mark.integration
+    def test_distingue_discriminacoes_com_taxas_semelhantes(self):
+        rng = np.random.default_rng(42)
+        n_students = 2000
+        thetas = rng.normal(size=n_students)
+
+        # Dois itens com taxas de acerto próximas, mas discriminações reais bem
+        # diferentes. A calibração conjunta precisa capturar essa diferença.
+        items = [
+            {"a": 2.5, "b": 0.0, "c": 0.20},
+            {"a": 0.6, "b": -0.4, "c": 0.20},
+            {"a": 1.2, "b": -1.0, "c": 0.20},
+            {"a": 1.4, "b": 0.8, "c": 0.20},
+            {"a": 0.9, "b": 1.2, "c": 0.20},
+            {"a": 1.8, "b": -0.7, "c": 0.20},
+        ]
+
+        responses = []
+        for item in items:
+            prob = item["c"] + (1 - item["c"]) / (
+                1 + np.exp(-item["a"] * (thetas - item["b"]))
+            )
+            responses.append((rng.random(n_students) < prob).astype(int))
+
+        matrix = np.stack(responses, axis=1)
+        params = calibrar_itens(matrix, c=0.20, n_quad=31)
+
+        assert params[0]["a"] > params[1]["a"]
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # EAP Theta Estimation
@@ -178,6 +207,23 @@ class TestAncorarNotas:
         ]
         resultados = ancorar_notas(thetas, tabela, "MT")
         assert resultados[1]["nota_ancorada"] >= resultados[0]["nota_ancorada"]
+
+    @pytest.mark.unit
+    def test_sinal_do_theta_define_lado_da_faixa(self, tabela):
+        thetas = [
+            {"aluno_id": "neg", "acertos": 20, "theta": -0.8, "se": 0.3},
+            {"aluno_id": "zero", "acertos": 20, "theta": 0.0, "se": 0.3},
+            {"aluno_id": "pos", "acertos": 20, "theta": 0.8, "se": 0.3},
+        ]
+        resultados = ancorar_notas(thetas, tabela, "MT")
+        ref = tabela.obter("MT", 20)
+        nota_neg = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "neg")
+        nota_zero = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "zero")
+        nota_pos = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "pos")
+
+        assert nota_neg <= ref["tri_med"] + 0.1
+        assert abs(nota_zero - ref["tri_med"]) <= 0.1
+        assert nota_pos >= ref["tri_med"] - 0.1
 
     @pytest.mark.unit
     def test_zero_acertos_nota_fixa(self, tabela):
@@ -290,3 +336,69 @@ class TestEstimarThetaIndividual:
         resultado = estimar_theta_individual(respostas, params, "MT", tabela)
         assert resultado["nota_ancorada"] <= TRI_MAXIMA_OFICIAL["MT"]
         assert resultado["nota_ancorada"] > 0
+
+    @pytest.mark.integration
+    def test_transformacao_distingue_padroes_com_mesmos_acertos(self, tabela):
+        params = (
+            [{"a": 1.2, "b": -2.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": -1.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 0.5, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 1.5, "c": 0.20}] * 2
+        )
+        respostas_padrao_1 = [1, 1, 1, 1, 0, 0, 0, 0]
+        respostas_padrao_2 = [0, 0, 0, 0, 1, 1, 1, 1]
+        transformacao = {"mu": 500.0, "sigma": 100.0}
+
+        resultado_padrao_1 = estimar_theta_individual(
+            respostas_padrao_1, params, "MT", tabela, transformacao=transformacao
+        )
+        resultado_padrao_2 = estimar_theta_individual(
+            respostas_padrao_2, params, "MT", tabela, transformacao=transformacao
+        )
+
+        assert resultado_padrao_1["acertos"] == resultado_padrao_2["acertos"] == 4
+        assert resultado_padrao_1["theta"] != resultado_padrao_2["theta"]
+        assert resultado_padrao_1["nota_ancorada"] != resultado_padrao_2["nota_ancorada"]
+        assert (
+            resultado_padrao_1["theta"] > resultado_padrao_2["theta"]
+        ) == (
+            resultado_padrao_1["nota_ancorada"] > resultado_padrao_2["nota_ancorada"]
+        )
+
+    @pytest.mark.integration
+    def test_sem_transformacao_nao_fixa_nota_na_mediana(self, tabela):
+        params = (
+            [{"a": 1.2, "b": -2.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": -1.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 0.5, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 1.5, "c": 0.20}] * 2
+        )
+        respostas_padrao_1 = [1, 1, 1, 1, 0, 0, 0, 0]
+        respostas_padrao_2 = [0, 0, 0, 0, 1, 1, 1, 1]
+
+        resultado_padrao_1 = estimar_theta_individual(
+            respostas_padrao_1,
+            params,
+            "MT",
+            tabela,
+        )
+        resultado_padrao_2 = estimar_theta_individual(
+            respostas_padrao_2,
+            params,
+            "MT",
+            tabela,
+        )
+
+        ref = tabela.obter("MT", 4)
+        margem = (ref["tri_max"] - ref["tri_min"]) * 0.03 + 0.1
+
+        assert resultado_padrao_1["acertos"] == resultado_padrao_2["acertos"] == 4
+        assert resultado_padrao_1["theta"] != resultado_padrao_2["theta"]
+        assert resultado_padrao_1["nota_ancorada"] != resultado_padrao_2["nota_ancorada"]
+        assert (
+            resultado_padrao_1["theta"] > resultado_padrao_2["theta"]
+        ) == (
+            resultado_padrao_1["nota_ancorada"] > resultado_padrao_2["nota_ancorada"]
+        )
+        for resultado in (resultado_padrao_1, resultado_padrao_2):
+            assert ref["tri_min"] - margem <= resultado["nota_ancorada"] <= ref["tri_max"] + margem

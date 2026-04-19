@@ -359,7 +359,7 @@ def build_resultado_estruturado(
         },
         "performance": {
             "nota_tri": round(float(nota), 1),
-            "metodo_ancoragem": "Cohort-Anchored Distribution (z-score → tri_min/med/max)",
+            "metodo_ancoragem": "Theta Ref Fixo (theta < 0 → MIN-MED; theta > 0 → MED-MAX)",
             "ancoragem": {
                 "tri_min": round(float(ref_min), 1),
                 "tri_med": round(float(ref_med), 1),
@@ -449,14 +449,15 @@ def build_metodologia_banner(
             "mensagem": (
                 f"Esta turma é estatisticamente forte (média {acertos_medio:.0f}/{n_itens} = "
                 f"{pct_acerto_medio:.0f}%, acima do P95 nacional). "
-                f"V3 Local pode inflar scores em populações não-representativas. "
+                f"V3 Local ainda depende de calibração local e pode distorcer scores "
+                f"em populações não-representativas. "
                 f"Para precisão absoluta vs INEP, use modo V4 INEP (se as questões forem do banco oficial)."
             ),
         })
 
     return {
-        "metodo_principal": "V3 Local — Cohort-Anchored Distribution",
-        "descricao_curta": "Calibração local 3PL + EAP + ancoragem por z-score na coorte",
+        "metodo_principal": "V3 Local — Theta Ref Fixo por Faixa Oficial",
+        "descricao_curta": "Calibração local 3PL + EAP + ancoragem fixa em MIN-MED-MAX",
         "n_alunos": n_alunos,
         "n_itens": n_itens,
         "cohort_stats": {

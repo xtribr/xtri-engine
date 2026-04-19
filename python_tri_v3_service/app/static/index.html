@@ -126,9 +126,9 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
     </div>
     <div class="drop-zone" id="dropZone">
       <div class="lbl">Arraste o arquivo aqui ou clique para selecionar</div>
-      <div class="sub">CSV ou XLSX com respostas binarias (0/1). Uma area por arquivo.</div>
+      <div class="sub">CSV, TXT ou XLSX com respostas binarias (0/1). Uma area por arquivo.</div>
       <div class="fname" id="fname"></div>
-      <input type="file" accept=".csv,.xlsx,.xls" id="fileInput">
+      <input type="file" accept=".csv,.txt,.xlsx,.xls" id="fileInput">
     </div>
     <div class="form-row">
       <button class="btn btn-primary" id="btnProcess" disabled>Processar</button>
@@ -151,8 +151,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       <div class="tune-item">
         <label>Metodo:</label>
         <select id="anchorMethod" title="Metodo de ancoragem para converter theta em nota ENEM">
-          <option value="mediana_ancorada" selected>Cohort-Anchored</option>
-          <option value="percentil_turma">Percentil na Turma</option>
+          <option value="theta_ref_fixo" selected>Theta Ref Fixo</option>
           <option value="mediana_acertos">Mediana por Acertos</option>
           <option value="cdf_theta">CDF do Theta (legacy)</option>
         </select>
@@ -179,20 +178,19 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       <div style="margin-top:.6rem;display:grid;grid-template-columns:1fr 1fr;gap:.6rem 1.5rem">
         <div>
           <strong style="color:#2c3e50">Metodo de Ancoragem</strong><br>
-          Define como o theta (habilidade estimada) e convertido em nota na escala ENEM usando a tabela de referencia oficial.
+          Define como o theta (habilidade estimada) e convertido em nota na escala ENEM usando a tabela de referencia oficial do ano escolhido.
           <ul style="margin:.3rem 0 0 1rem;padding:0">
-            <li><strong>Rank Intragrupo (Primi)</strong> — Recomendado. Agrupa alunos pelo numero de acertos. Dentro de cada grupo, ordena por theta e distribui as notas no intervalo [Min, Max] da tabela oficial. Garante 100% dentro do intervalo.</li>
-            <li><strong>Percentil na Turma</strong> — Posiciona cada aluno pelo seu percentil global na turma (baseado no theta) dentro do intervalo de referencia do seu numero de acertos.</li>
+            <li><strong>Theta Ref Fixo</strong> — Recomendado. Usa o sinal do theta em escala fixa para decidir o lado da faixa oficial por acertos: theta negativo em `MIN-MED`, theta positivo em `MED-MAX`. Nao depende da media da turma.</li>
             <li><strong>Mediana por Acertos</strong> — Atribui a todos os alunos com K acertos a nota mediana oficial. Nao diferencia pelo padrao de respostas. Util como baseline.</li>
-            <li><strong>CDF do Theta (legacy)</strong> — Metodo antigo. Usa a CDF da normal para interpolar no intervalo [Min, Max]. Produz notas abaixo da mediana para populacoes fortes.</li>
+            <li><strong>CDF do Theta (legacy)</strong> — Metodo antigo. Usa a CDF da normal para interpolar em toda a faixa [Min, Max], sem respeitar a divisao estrutural `MIN-MED-MAX` pelo sinal do theta.</li>
           </ul>
         </div>
         <div>
           <strong style="color:#2c3e50">Theta Shift</strong> (-2.0 a +2.0)<br>
-          Desloca todos os thetas por uma constante. Valores positivos aumentam as notas, negativos diminuem. Compensa a diferenca entre a populacao do simulado e a populacao de referencia do ENEM. Se sua turma e mais forte que a media ENEM, use valores negativos. Se mais fraca, positivos.
+          Desloca o theta de referencia por uma constante antes da ancoragem. Valores positivos empurram o aluno para mais perto do lado `MED-MAX`; valores negativos para `MIN-MED`.
           <br><br>
           <strong style="color:#2c3e50">Theta Scale</strong> (0.5 a 2.0)<br>
-          Multiplica todos os thetas por este fator. Valores maiores que 1.0 aumentam a dispersao das notas (mais diferenca entre alunos fortes e fracos). Valores menores comprimem as notas para o centro. Ajusta a variabilidade relativa do grupo.
+          Multiplica o theta de referencia por este fator. Valores maiores que 1.0 aumentam a dispersao das notas dentro das faixas; valores menores aproximam os alunos do centro pedagogico.
           <br><br>
           <strong style="color:#2c3e50">c (chute)</strong> (0.10 a 0.30)<br>
           Parametro de acerto casual do modelo 3PL (probabilidade de acertar no chute). Para provas de 5 alternativas, o padrao e 0.20 (1/5). Valores menores tornam a calibracao mais rigorosa com acertos em itens dificeis. Valores maiores assumem mais chute. <strong>Alterar este parametro recalibra todos os itens</strong> (demora alguns segundos).
@@ -226,6 +224,8 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
 
 <script>
 const $=s=>document.querySelector(s);
+const APP_QUERY=new URLSearchParams(window.location.search);
+const IS_TOGA_CLIENT=APP_QUERY.get('client')==='toga';
 let resultData=null, rawThetas=[], refLookup={}, currentArea='', currentAl='', lastFileBuffer=null;
 
 // ── Years ──
@@ -260,6 +260,61 @@ const ESTADO_COLORS={AVANCADO:'#27ae60',PROFICIENTE:'#3498db',BASICO:'#f39c12',E
 const ESTADO_ORDER=['INICIANTE','ELEMENTAR','BASICO','PROFICIENTE','AVANCADO'];
 function estadoTri(n){if(n>=700)return'AVANCADO';if(n>=600)return'PROFICIENTE';if(n>=500)return'BASICO';if(n>=400)return'ELEMENTAR';return'INICIANTE'}
 
+function preserveInternalQuery(){
+  if(!APP_QUERY.toString())return;
+  document.querySelectorAll('header .nav a').forEach(a=>{
+    const href=a.getAttribute('href');
+    if(!href||href.startsWith('http'))return;
+    const url=new URL(href,window.location.origin);
+    APP_QUERY.forEach((value,key)=>url.searchParams.set(key,value));
+    a.setAttribute('href',url.pathname+url.search);
+  });
+}
+preserveInternalQuery();
+
+function autoScrollToResults(){
+  const el=$('#results');
+  if(!el)return;
+  window.requestAnimationFrame(()=>el.scrollIntoView({behavior:'smooth',block:'start'}));
+}
+
+function downloadBlob(blob,filename){
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;
+  a.download=filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(()=>URL.revokeObjectURL(url),1500);
+}
+
+function parseDownloadFilename(resp,fallback){
+  const disposition=resp.headers.get('content-disposition')||'';
+  const match=disposition.match(/filename=\"?([^\";]+)\"?/i);
+  return match&&match[1]?match[1]:fallback;
+}
+
+async function handleExportResponse(resp,fallbackFilename){
+  if(!resp.ok){
+    const err=await resp.json().catch(()=>({detail:'Erro no download'}));
+    throw new Error(err.detail||'Erro no download');
+  }
+  const contentType=(resp.headers.get('content-type')||'').toLowerCase();
+  if(contentType.includes('application/json')){
+    const data=await resp.json();
+    alert('Arquivo salvo em:\n'+data.caminho);
+    return;
+  }
+  const blob=await resp.blob();
+  downloadBlob(blob,parseDownloadFilename(resp,fallbackFilename));
+}
+
+if(IS_TOGA_CLIENT){
+  $('#btnDownload').textContent='Salvar CSV';
+  $('#btnDownloadExcel').textContent='Salvar Excel';
+}
+
 // ── Reference lookup with clamping ──
 function getRef(acertos){
   if(refLookup[acertos])return refLookup[acertos];
@@ -270,26 +325,15 @@ function getRef(acertos){
 }
 
 // ── Anchoring methods ──
-// Cohort-Anchored Distribution: z-score normalization within cohort +
-// percentile mapping into [tri_min, tri_med, tri_max] of the official table.
-//
-// IMPORTANT: shift and scale are applied to the z-score AFTER cohort
-// normalization, NOT to the input theta. Pre-shifting thetas is a no-op
-// because the cohort mean shifts by the same amount, cancelling out.
-// Post-shifting z lets the user actually move their cohort relative to
-// the reference distribution:
-//   shift > 0 → every student's percentile moves up → notas higher
-//   scale > 1 → z magnitudes increase → top spreads further from bottom
-function anchorCohortAnchored(theta, acertos, cohortMean, cohortStd, shift, scale){
+// Theta de referência fixa: o lado da faixa vem do sinal do theta.
+//   theta < 0  → MIN-MED
+//   theta = 0  → MED
+//   theta > 0  → MED-MAX
+function anchorThetaRefFixo(theta, acertos){
   const r=getRef(acertos); if(!r)return 0;
   if(r.tri_min===r.tri_max)return r.tri_med;
-  const std=cohortStd<1e-6?1.0:cohortStd;
-  const zRaw=(theta-cohortMean)/std;
-  // Apply shift/scale POST-COHORT (defaults: shift=0, scale=1 → identity)
-  const s=(scale==null?1:scale), sh=(shift==null?0:shift);
-  const z=zRaw*s+sh;
-  const pct=normCdf(z);
-  if(pct<=0.5){
+  const pct=normCdf(theta);
+  if(theta<=0){
     const localPct=pct/0.5;
     return r.tri_min+localPct*(r.tri_med-r.tri_min);
   }
@@ -543,36 +587,31 @@ $('#ano').addEventListener('change',updateV4Fields);
 
 let lastFileName='';
 
+function applyAnchorMethodFromLocation(){
+  const preferred=new URLSearchParams(window.location.search).get('anchor_method');
+  const sel=$('#anchorMethod');
+  if(!preferred||!sel)return;
+  const available=Array.from(sel.options).map(opt=>opt.value);
+  if(available.includes(preferred))sel.value=preferred;
+}
+applyAnchorMethodFromLocation();
+
 // ── Re-anchor (client-side) ──
 function reanchor(){
   if(!resultData||!rawThetas.length)return;
   const shift=parseFloat($('#sliderShift').value), scale=parseFloat($('#sliderScale').value);
   const method=$('#anchorMethod').value;
   const al=currentAl;
-  // Adjusted thetas (used by non-cohort methods: cdf_theta, mediana_acertos, percentil_turma).
-  // For these, pre-shifting/scaling thetas IS meaningful because they don't normalize against the cohort.
+  // Ajuste do theta de referência em escala fixa.
   const adjusted=rawThetas.map(r=>({...r,thetaAdj:(r.theta+shift)*scale}));
-
-  // REAL cohort statistics (from unshifted thetas) — used by Cohort-Anchored only.
-  // Pre-applying shift/scale here would cancel out (mean and std move proportionally),
-  // so we keep the cohort stats unchanged and apply shift/scale POST-z-score inside
-  // anchorCohortAnchored().
-  const realThetas=rawThetas.map(r=>r.theta);
-  const realCohortMean=realThetas.reduce((s,v)=>s+v,0)/realThetas.length;
-  const realCohortVar=realThetas.reduce((s,v)=>s+(v-realCohortMean)*(v-realCohortMean),0)/realThetas.length;
-  const realCohortStd=Math.sqrt(realCohortVar);
-
-  // For percentil method, sort by adjusted theta and assign global ranks
-  if(method==='percentil_turma'){adjusted.sort((a,b)=>a.thetaAdj-b.thetaAdj);adjusted.forEach((r,i)=>{r.rank=i})}
   // Compute notas
   let dentro=0;
   adjusted.forEach(r=>{
     let nota;
-    if(method==='mediana_ancorada')nota=anchorCohortAnchored(r.theta,r.acertos,realCohortMean,realCohortStd,shift,scale);
+    if(method==='theta_ref_fixo')nota=anchorThetaRefFixo(r.thetaAdj,r.acertos);
     else if(method==='cdf_theta')nota=anchorCdfTheta(r.thetaAdj,r.acertos);
     else if(method==='mediana_acertos')nota=anchorMedianaAcertos(r.thetaAdj,r.acertos);
-    else if(method==='percentil_turma')nota=anchorPercentilTurma(r.theta,r.acertos,r.rank,adjusted.length,shift,scale);
-    else nota=anchorCohortAnchored(r.theta,r.acertos,realCohortMean,realCohortStd,shift,scale);
+    else nota=anchorThetaRefFixo(r.thetaAdj,r.acertos);
     nota=Math.round(nota*10)/10;
     r.nota=nota;r.estado=estadoTri(nota);
     const ref2=getRef(r.acertos);
@@ -614,18 +653,14 @@ function reanchor(){
   // Reference / Difficulty table (like ENEM 2024 PDF)
   renderRefTable(adjusted);
   $('#results').classList.add('active');$('#btnDownload').style.display='inline-block';$('#btnDownloadExcel').style.display='inline-block';
+  autoScrollToResults();
 }
 
 // ── Slider events ──
 function updateSliderState(){
   const m=$('#anchorMethod').value;
-  // Shift/Scale are applied differently per method:
-  //   - Cohort-Anchored: applied POST z-score (zRaw*scale + shift) — see anchorCohortAnchored
-  //   - Percentil na Turma: applied to the percentile via normCdf shift + spread — see anchorPercentilTurma
-  //   - CDF do Theta: applied to raw theta (legacy method, theta is the input)
-  //   - Mediana por Acertos: ignores theta entirely → sliders disabled
-  // Pre-applying shift/scale to cohort/percentil thetas would cancel out (uniform
-  // transformations don't change ranks or cohort z-scores).
+  // Theta Ref Fixo e CDF do Theta usam o theta ajustado.
+  // Mediana por Acertos ignora theta e desabilita os controles.
   const disabled=(m==='mediana_acertos');
   $('#sliderShift').disabled=disabled;
   $('#sliderScale').disabled=disabled;
@@ -644,7 +679,7 @@ $('#sliderC').addEventListener('change',()=>{$('#cNote').textContent='recalibran
 $('#btnReset').addEventListener('click',()=>{
   $('#sliderShift').value=0;$('#valShift').textContent='0.0';
   $('#sliderScale').value=1;$('#valScale').textContent='1.0';
-  $('#anchorMethod').value='mediana_ancorada';
+  $('#anchorMethod').value='theta_ref_fixo';
   if(parseFloat($('#sliderC').value)!==0.20){$('#sliderC').value=0.20;$('#valC').textContent='0.20';doProcess(0.20)}
   else reanchor();
 });
@@ -880,13 +915,23 @@ function renderRefTable(students){
 }
 
 // ── Download ──
-$('#btnDownload').addEventListener('click',()=>{
-  if(!resultData)return;const al=currentAl,area=currentArea;
-  const hdr=['ID','Acertos','Theta','Nota_TRI','Pct_Dificeis','Nivel'];
-  let csv='\uFEFF'+hdr.join(';')+'\n';
-  resultData.resultados.forEach(r=>{csv+=[r.aluno_id,r['acertos_'+al]!=null?r['acertos_'+al]:'',r['theta_'+al]!=null?r['theta_'+al]:'',r['nota_'+al]!=null?String(r['nota_'+al]).replace('.',','):'',r['acert_dif_'+al]!=null?String(r['acert_dif_'+al]).replace('.',','):'',r['estado_'+al]||''].join(';')+'\n'});
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='resultados_'+area+'_'+resultData.ano_referencia+'_'+Date.now()+'.csv';a.click();URL.revokeObjectURL(url);
+$('#btnDownload').addEventListener('click',async()=>{
+  if(!resultData)return;
+  try{
+    const qs=IS_TOGA_CLIENT?'?salvar_localmente=true':'';
+    const resp=await fetch('/api/v3/exportar-csv'+qs,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        area:currentArea,
+        ano_referencia:resultData.ano_referencia,
+        resultados:resultData.resultados
+      })
+    });
+    await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.csv');
+  }catch(e){
+    alert('Erro ao gerar CSV: '+e.message);
+  }
 });
 
 // ── Download Excel ──
@@ -914,26 +959,13 @@ $('#btnDownloadExcel').addEventListener('click',async()=>{
       chart_png_base64:chartPng
     };
 
-    const resp=await fetch('/api/v3/exportar-excel',{
+    const qs=IS_TOGA_CLIENT?'?salvar_localmente=true':'';
+    const resp=await fetch('/api/v3/exportar-excel'+qs,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload)
     });
-
-    if(!resp.ok){
-      const err=await resp.json().catch(()=>({detail:'Erro'}));
-      throw new Error(err.detail||'Erro ao gerar Excel');
-    }
-
-    const blob=await resp.blob();
-    const url=URL.createObjectURL(blob);
-    const a=document.createElement('a');
-    a.href=url;
-    a.download='xtri_'+currentArea+'_'+resultData.ano_referencia+'_'+Date.now()+'.xlsx';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.xlsx');
   }catch(e){
     alert('Erro ao gerar Excel: '+e.message);
   }finally{

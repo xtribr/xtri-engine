@@ -124,13 +124,15 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
 
     <div class="drop-zone" id="dropZone">
       <div class="lbl">Arraste o arquivo aqui ou clique para selecionar</div>
-      <div class="sub">CSV ou XLSX com respostas binárias (0/1). Número de itens por aluno deve bater com a prova selecionada.</div>
+      <div class="sub">CSV, TXT ou XLSX com respostas binárias (0/1). Número de itens por aluno deve bater com a prova selecionada.</div>
       <div class="fname" id="fname"></div>
-      <input type="file" accept=".csv,.xlsx,.xls" id="fileInput">
+      <input type="file" accept=".csv,.txt,.xlsx,.xls" id="fileInput">
     </div>
 
     <div class="form-row">
       <button class="btn btn-primary" id="btnProcess" disabled>Validar Simulado</button>
+      <button class="btn" id="btnExportCsv" style="display:none;background:#27ae60;color:#fff">Baixar CSV</button>
+      <button class="btn" id="btnExportExcel" style="display:none;background:#217346;color:#fff">Baixar Excel</button>
     </div>
   </div>
 
@@ -190,7 +192,79 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
 
 <script>
 const $ = s => document.querySelector(s);
+const APP_QUERY = new URLSearchParams(window.location.search);
+const IS_TOGA_CLIENT = APP_QUERY.get('client') === 'toga';
 let provasDisponiveis = {};  // ano → {area → [co_provas]}
+let lastValidationData = null;
+
+function preserveInternalQuery() {
+  if (!APP_QUERY.toString()) return;
+  document.querySelectorAll('header .nav a').forEach(a => {
+    const href = a.getAttribute('href');
+    if (!href || href.startsWith('http')) return;
+    const url = new URL(href, window.location.origin);
+    APP_QUERY.forEach((value, key) => url.searchParams.set(key, value));
+    a.setAttribute('href', url.pathname + url.search);
+  });
+}
+preserveInternalQuery();
+
+function autoScrollToResults() {
+  const el = $('#results');
+  if (!el) return;
+  window.requestAnimationFrame(() => el.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function parseDownloadFilename(resp, fallback) {
+  const disposition = resp.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename=\"?([^\";]+)\"?/i);
+  return match && match[1] ? match[1] : fallback;
+}
+
+async function handleExportResponse(resp, fallbackFilename) {
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ detail: 'Erro no download' }));
+    throw new Error(err.detail || 'Erro no download');
+  }
+  const contentType = (resp.headers.get('content-type') || '').toLowerCase();
+  if (contentType.includes('application/json')) {
+    const data = await resp.json();
+    alert('Arquivo salvo em:\n' + data.caminho);
+    return;
+  }
+  const blob = await resp.blob();
+  downloadBlob(blob, parseDownloadFilename(resp, fallbackFilename));
+}
+
+function exportPayload() {
+  return {
+    ano: Number($('#ano').value),
+    area: $('#area').value,
+    co_prova: $('#coProva').value,
+    n_itens: lastValidationData?.n_itens,
+    tempo_processamento: lastValidationData?.tempo_processamento,
+    avisos: lastValidationData?.avisos || [],
+    estatisticas: lastValidationData?.estatisticas || {},
+    transformacao_inep: lastValidationData?.transformacao_inep || {},
+    resultados: lastValidationData?.resultados || [],
+  };
+}
+
+if (IS_TOGA_CLIENT) {
+  $('#btnExportCsv').textContent = 'Salvar CSV';
+  $('#btnExportExcel').textContent = 'Salvar Excel';
+}
 
 // ── Load available years ──
 fetch('/api/v4/enem/info').then(r => r.json()).then(data => {
@@ -311,6 +385,7 @@ function esc(s) { const d = document.createElement('div'); d.textContent = s; re
 
 // ── Render ──
 function renderResults(data) {
+  lastValidationData = data;
   const s = data.estatisticas;
   const t = data.transformacao_inep;
 
@@ -373,6 +448,9 @@ function renderResults(data) {
   renderTable(data.resultados);
 
   $('#results').classList.add('active');
+  $('#btnExportCsv').style.display = 'inline-block';
+  $('#btnExportExcel').style.display = 'inline-block';
+  autoScrollToResults();
 }
 
 function renderTable(rows) {
@@ -470,6 +548,43 @@ function drawScatter(rows) {
   ctx.fillText('Nota V3 (calibração local)', 0, 0);
   ctx.restore();
 }
+
+$('#btnExportCsv').addEventListener('click', async () => {
+  if (!lastValidationData) return;
+  try {
+    const qs = IS_TOGA_CLIENT ? '?salvar_localmente=true' : '';
+    const resp = await fetch('/api/v4/enem/exportar-validacao-csv' + qs, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(exportPayload()),
+    });
+    await handleExportResponse(resp, 'xtri_validator_' + $('#area').value + '_' + $('#ano').value + '.csv');
+  } catch (e) {
+    alert('Erro ao gerar CSV: ' + e.message);
+  }
+});
+
+$('#btnExportExcel').addEventListener('click', async () => {
+  if (!lastValidationData) return;
+  const btn = $('#btnExportExcel');
+  const original = btn.textContent;
+  btn.textContent = 'Gerando...';
+  btn.disabled = true;
+  try {
+    const qs = IS_TOGA_CLIENT ? '?salvar_localmente=true' : '';
+    const resp = await fetch('/api/v4/enem/exportar-validacao-excel' + qs, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(exportPayload()),
+    });
+    await handleExportResponse(resp, 'xtri_validator_' + $('#area').value + '_' + $('#ano').value + '.xlsx');
+  } catch (e) {
+    alert('Erro ao gerar Excel: ' + e.message);
+  } finally {
+    btn.textContent = original;
+    btn.disabled = false;
+  }
+});
 </script>
 </body>
 </html>
