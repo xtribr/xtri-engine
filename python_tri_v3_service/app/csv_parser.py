@@ -90,6 +90,25 @@ def _is_binary_row(row: list[str]) -> bool:
     return all(c in ("0", "1") for c in non_empty)
 
 
+def _is_id_plus_binary_row(row: list[str]) -> bool:
+    """Detect a headerless data row whose first cell is an ID and rest is binary.
+
+    Without this, ``"S000,1,0,1,...,1"`` gets misclassified as a header row
+    because ``S000`` isn't ``"0"`` or ``"1"`` — and the first student is
+    silently dropped from the parsed output.
+    """
+    if len(row) < 31:
+        return False
+    first = row[0].strip()
+    # First cell must NOT be an integer/binary header — it must look like an ID.
+    if not first or first in ("0", "1"):
+        return False
+    rest = [c.strip() for c in row[1:] if c.strip()]
+    if len(rest) < 30:
+        return False
+    return all(c in ("0", "1") for c in rest)
+
+
 def _parse_csv_text(csv_content: str) -> dict[str, Any]:
     """Parse CSV text content."""
     avisos: list[str] = []
@@ -99,12 +118,19 @@ def _parse_csv_text(csv_content: str) -> dict[str, Any]:
 
     first_row = next(reader)
 
-    # Headerless detection: if first row is all 0/1 binary, synthesize headers
-    headerless = _is_binary_row(first_row)
-    if headerless:
+    # Headerless detection: recognise two shapes that must be treated as data:
+    # - all 0/1 binary (pure headerless)
+    # - ID + binary (headerless with a leading ID column)
+    headerless_binary = _is_binary_row(first_row)
+    headerless_with_id = (not headerless_binary) and _is_id_plus_binary_row(first_row)
+    headerless = headerless_binary or headerless_with_id
+    if headerless_binary:
         n_cols = len(first_row)
         headers = [str(i + 1) for i in range(n_cols)]
-        # Re-create reader to include the first row as data
+        reader = csv.reader(io.StringIO(csv_content), delimiter=delimiter)
+    elif headerless_with_id:
+        n_cols = len(first_row)
+        headers = ["ID"] + [str(i) for i in range(1, n_cols)]
         reader = csv.reader(io.StringIO(csv_content), delimiter=delimiter)
     else:
         headers = first_row

@@ -831,8 +831,12 @@ def _make_area_file(
                 header_cells.extend(list(range(1, n_itens + 1)))
             ws.append(header_cells)
         for row in data_rows:
-            ws.append([int(c) if c.isdigit() and (not with_id or idx > 0) else c
-                       for idx, c in enumerate(row)])
+            # row layout: [id?, "0"/"1" × n_itens]. Keep id as str, cast binaries to int.
+            if with_id:
+                cells: list = [row[0]] + [int(c) for c in row[1:]]
+            else:
+                cells = [int(c) for c in row]
+            ws.append(cells)
         buf = BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -966,12 +970,19 @@ class TestProcessarCSVFormatMatrix:
         )
         assert resp.status_code == 200, f"{label}: {resp.text[:200]}"
         body = resp.json()
-        assert body["n_alunos"] >= 18, f"{label}: only {body['n_alunos']}/20"
+        assert body["n_alunos"] == 20, f"{label}: {body['n_alunos']}/20"
         assert body["resultados"][0]["aluno_id"] == "S000"
 
     @pytest.mark.api
-    @pytest.mark.parametrize("with_header", [True, False])
-    @pytest.mark.parametrize("with_id", [True, False])
+    @pytest.mark.parametrize(
+        "with_header,with_id",
+        [
+            pytest.param(True, True, id="header+id"),
+            pytest.param(True, False, id="header+noid"),
+            pytest.param(False, True, id="noheader+id"),
+            pytest.param(False, False, id="noheader+noid"),
+        ],
+    )
     def test_header_and_id_combinations(
         self, client: TestClient, ano: int, with_header: bool, with_id: bool,
     ):
@@ -992,16 +1003,15 @@ class TestProcessarCSVFormatMatrix:
             f"header={with_header} id={with_id}: {resp.text[:200]}"
         )
         body = resp.json()
-        # Calibration can drop students with degenerate response patterns
-        # (all-0/all-1 or unresolved theta); 90% survival is the floor.
-        assert body["n_alunos"] >= 18, (
-            f"header={with_header} id={with_id}: only {body['n_alunos']}/20"
+        assert body["n_alunos"] == 20, (
+            f"header={with_header} id={with_id}: {body['n_alunos']}/20"
         )
-        first_id = body["resultados"][0]["aluno_id"]
+        aluno_ids = [r["aluno_id"] for r in body["resultados"]]
         if with_id:
-            assert first_id.startswith("S")
+            assert "S000" in aluno_ids, "First student must survive round-trip"
+            assert aluno_ids[0] == "S000"
         else:
-            assert first_id.startswith("aluno_")
+            assert all(aid.startswith("aluno_") for aid in aluno_ids)
 
     @pytest.mark.api
     def test_questao_style_header(self, client: TestClient, ano: int):
@@ -1015,7 +1025,7 @@ class TestProcessarCSVFormatMatrix:
             files={"arquivo": ("questao.csv", content, "text/csv")},
         )
         assert resp.status_code == 200, resp.text[:200]
-        assert resp.json()["n_alunos"] >= 18
+        assert resp.json()["n_alunos"] == 20
 
     @pytest.mark.api
     def test_xlsx_round_trip(self, client: TestClient, ano: int):
@@ -1033,7 +1043,7 @@ class TestProcessarCSVFormatMatrix:
             },
         )
         assert resp.status_code == 200, resp.text[:200]
-        assert resp.json()["n_alunos"] >= 18
+        assert resp.json()["n_alunos"] == 20
 
     @pytest.mark.api
     def test_utf8_bom_is_tolerated(self, client: TestClient, ano: int):
@@ -1046,13 +1056,18 @@ class TestProcessarCSVFormatMatrix:
             files={"arquivo": ("bom.csv", bom_bytes, "text/csv")},
         )
         assert resp.status_code == 200, resp.text[:200]
-        assert resp.json()["n_alunos"] >= 18
+        assert resp.json()["n_alunos"] == 20
 
     @pytest.mark.api
     def test_latin1_encoding_is_tolerated(self, client: TestClient, ano: int):
-        """Latin-1 fallback for files that aren't valid UTF-8."""
+        """Latin-1 fallback for files that aren't valid UTF-8.
+
+        Encoding the mangled-ID text as latin-1 produces a byte sequence
+        where ``\\xe7\\xe3`` would fail UTF-8 decode; the handler's
+        ``except UnicodeDecodeError: raw.decode('latin-1')`` path must
+        kick in and preserve the original characters in aluno_id.
+        """
         content = _make_area_file(n=20, delimiter=",", with_header=True, with_id=True)
-        # Replace a student id with a non-UTF8 byte sequence (Latin-1 only)
         mangled = content.replace("S003", "A\xe7\xe3o").encode("latin-1")
         resp = client.post(
             "/api/v3/processar-csv",
@@ -1060,7 +1075,15 @@ class TestProcessarCSVFormatMatrix:
             files={"arquivo": ("latin1.csv", mangled, "text/csv")},
         )
         assert resp.status_code == 200, resp.text[:200]
-        assert resp.json()["n_alunos"] >= 18
+        body = resp.json()
+        assert body["n_alunos"] == 20
+        aluno_ids = [r["aluno_id"] for r in body["resultados"]]
+        # The latin-1 characters must survive the decode+parse round-trip
+        assert "A\xe7\xe3o" in aluno_ids, (
+            f"Expected 'A\\xe7\\xe3o' in aluno_ids, got: {aluno_ids}"
+        )
+        # And S003 (the pre-mangle id) must NOT be there anymore
+        assert "S003" not in aluno_ids
 
 
 class TestFrontendStatic:
