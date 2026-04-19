@@ -20,6 +20,7 @@ FastAPI worker threads never try to attach to Cocoa/Tk (would crash with
 
 from __future__ import annotations
 
+import functools
 import io
 import logging
 from typing import Any, Optional
@@ -30,13 +31,17 @@ import pandas as pd
 from app.microdata.schema import AREAS
 
 
+@functools.lru_cache(maxsize=None)
 def _get_plt():
     """Lazy-load matplotlib.pyplot with the Agg backend.
 
-    First call selects the Agg backend (idempotent if already Agg) and returns
-    the pyplot module. Subsequent calls just re-import pyplot, which is cheap
-    once matplotlib is initialised. Lets the Mac .app skip ~60 MB of cold
-    matplotlib load until the user actually opens the microdata page.
+    Decorated with ``lru_cache`` so the body runs exactly once even across
+    racing FastAPI worker threads — the cache populates under the GIL,
+    eliminating the TOCTOU on ``matplotlib.get_backend() + use('Agg')``.
+
+    Returns:
+        The pyplot module. Lets the Mac .app skip ~60 MB of cold matplotlib
+        load until the user actually opens the microdata page.
     """
     import matplotlib
     if matplotlib.get_backend().lower() != "agg":
