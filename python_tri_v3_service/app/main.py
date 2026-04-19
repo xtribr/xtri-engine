@@ -14,6 +14,7 @@
 
 import csv
 import io
+import logging
 import os
 import sys
 import tempfile
@@ -181,6 +182,8 @@ async def lifespan(app: FastAPI):
 # APP
 # ════════════════════════════════════════════════════════════════════════════════
 
+logger = logging.getLogger(__name__)
+
 app = FastAPI(
     title="XTRI Engine API",
     description="API de estimação TRI para simulados ENEM — Motor Heurístico + Científico",
@@ -313,8 +316,12 @@ async def calcular_tri(request: Request):
             alunos.append(aluno_conv)
 
         t0 = time.time()
-        print(f"\n[TRI V3] Processando {len(alunos)} alunos (motor heurístico)...")
-        print(f"[TRI V3] Gabarito: {len(gabarito)} questões | Áreas: {list(areas_config.keys())}")
+        logger.info(
+            "heuristic: processing %d alunos, %d gabarito items, areas=%s",
+            len(alunos),
+            len(gabarito),
+            list(areas_config.keys()),
+        )
 
         # Processar com motor heurístico
         prova_analysis, resultados = processar_turma(
@@ -325,7 +332,7 @@ async def calcular_tri(request: Request):
         )
 
         elapsed = time.time() - t0
-        print(f"[TRI V3] Concluído em {elapsed:.2f}s | {len(resultados)} resultados")
+        logger.info("heuristic: done in %.2fs — %d resultados", elapsed, len(resultados))
 
         # Converter tipos numpy para JSON
         return JSONResponse(content=convert_numpy({
@@ -336,8 +343,8 @@ async def calcular_tri(request: Request):
         }))
 
     except Exception as e:
+        logger.exception("heuristic: /api/calcular-tri failed")
         error_trace = traceback.format_exc()
-        print(f"[TRI V3] ERRO: {error_trace}")
         return JSONResponse(
             status_code=500,
             content={
@@ -393,8 +400,14 @@ async def calibrar_cientifico(payload: RequestCalibrarCientifico):
             )
 
     t0 = time.time()
-    print(f"\n[TRI V3] Calibração científica: {payload.simulado_id} × {area}")
-    print(f"[TRI V3] N={len(payload.alunos)} alunos, {n_itens_esperado} itens, c={payload.c_fixo}")
+    logger.info(
+        "calibrar-cientifico: simulado=%s area=%s N=%d itens=%d c=%s",
+        payload.simulado_id,
+        area,
+        len(payload.alunos),
+        n_itens_esperado,
+        payload.c_fixo,
+    )
 
     try:
         # Converter para formato esperado pelo motor
@@ -417,9 +430,14 @@ async def calibrar_cientifico(payload: RequestCalibrarCientifico):
 
         elapsed = time.time() - t0
         diag = resultado['diagnostico']
-        print(f"[TRI V3] Concluído em {elapsed:.2f}s")
-        print(f"[TRI V3] b_médio={diag['b_medio']}, saturados={diag['itens_saturados']}")
-        print(f"[TRI V3] Nota média={diag['nota_media']}, {diag['pct_dentro_intervalo']}% no intervalo")
+        logger.info(
+            "calibrar-cientifico done in %.2fs — b_medio=%s saturados=%s nota_media=%s pct_dentro=%.1f",
+            elapsed,
+            diag['b_medio'],
+            diag['itens_saturados'],
+            diag['nota_media'],
+            diag['pct_dentro_intervalo'],
+        )
 
         # Montar resposta tipada
         parametros = [
@@ -483,8 +501,7 @@ async def calibrar_cientifico(payload: RequestCalibrarCientifico):
         )
 
     except Exception as e:
-        error_trace = traceback.format_exc()
-        print(f"[TRI V3] ERRO na calibração: {error_trace}")
+        logger.exception("calibrar-cientifico: pipeline failed")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1095,13 +1112,18 @@ async def processar_csv(
             c_fixo=c_fixo,
         )
     except Exception as e:
-        error_trace = traceback.format_exc()
-        print(f"[CSV] ERROR {area}: {error_trace}")
+        logger.exception("processar-csv calibration failed for area=%s", area)
         raise HTTPException(status_code=500, detail=f"Erro na calibracao: {e}")
 
     diag = resultado["diagnostico"]
-    print(f"[CSV] {area}/{ano_referencia}: {diag['n_alunos']} alunos, "
-          f"nota_media={diag['nota_media']}, {diag['pct_dentro_intervalo']}% dentro")
+    logger.info(
+        "processar-csv %s/%d: n_alunos=%d nota_media=%.1f pct_dentro=%.1f",
+        area,
+        ano_referencia,
+        diag["n_alunos"],
+        diag["nota_media"],
+        diag["pct_dentro_intervalo"],
+    )
 
     diagnosticos = [DiagnosticoArea(
         area=area,
@@ -1142,7 +1164,11 @@ async def processar_csv(
     )
 
     elapsed = time.time() - t0
-    print(f"[CSV] Done in {elapsed:.2f}s — V2.1 enrichment {len(resultados_estruturados)} students")
+    logger.info(
+        "processar-csv done in %.2fs — V2.1 enrichment for %d students",
+        elapsed,
+        len(resultados_estruturados),
+    )
 
     return ResponseProcessarCSV(
         status="sucesso",
@@ -2676,7 +2702,7 @@ def _build_resultados_excel_bytes(payload: Dict[str, Any]) -> tuple[bytes, str]:
             xlimg.height = 520
             ws4.add_image(xlimg, "A3")
         except Exception as exc:  # noqa: BLE001
-            print(f"[EXCEL] Failed to embed chart image: {exc}")
+            logger.warning("excel: failed to embed chart image: %s", exc)
 
     buf = io.BytesIO()
     wb.save(buf)
@@ -2881,8 +2907,7 @@ async def exportar_csv(payload: Dict[str, Any] = Body(...), salvar_localmente: b
             },
         )
     except Exception as exc:  # noqa: BLE001
-        error_trace = traceback.format_exc()
-        print(f"[CSV] ERROR: {error_trace}")
+        logger.exception("exportar-csv failed")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar CSV: {exc}")
 
 
@@ -2908,8 +2933,7 @@ async def exportar_excel(payload: Dict[str, Any] = Body(...), salvar_localmente:
             },
         )
     except Exception as exc:  # noqa: BLE001
-        error_trace = traceback.format_exc()
-        print(f"[EXCEL] ERROR: {error_trace}")
+        logger.exception("exportar-excel failed")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar Excel: {exc}")
 
 
@@ -2932,8 +2956,7 @@ async def exportar_validacao_csv(
             },
         )
     except Exception as exc:  # noqa: BLE001
-        error_trace = traceback.format_exc()
-        print(f"[VALIDATOR CSV] ERROR: {error_trace}")
+        logger.exception("exportar-validacao-csv failed")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar CSV do validator: {exc}")
 
 
@@ -2956,8 +2979,7 @@ async def exportar_validacao_excel(
             },
         )
     except Exception as exc:  # noqa: BLE001
-        error_trace = traceback.format_exc()
-        print(f"[VALIDATOR EXCEL] ERROR: {error_trace}")
+        logger.exception("exportar-validacao-excel failed")
         raise HTTPException(
             status_code=500, detail=f"Erro ao gerar Excel do validator: {exc}"
         )

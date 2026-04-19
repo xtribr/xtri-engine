@@ -251,13 +251,23 @@ fetch('/api/v3/anos-referencia').then(r=>r.json()).then(anos=>{
 }).catch(()=>{$('#ano').innerHTML='<option>Erro</option>'});
 
 // ── MIRT availability (advanced, opt-in) ──
+// 4s timeout via AbortController so the badges never stay in "carregando..."
+// if the backend is slow on cold start; users can click "Retry" to re-query.
+let _mirtAbort=null;
+const MIRT_FETCH_TIMEOUT_MS=4000;
 function refreshMIRTAvailability(){
   const ano=$('#ano').value||2024;
   const badges=$('#mirtBadges');const total=$('#mirtTotal');
   if(!badges||!total)return;
+  // Cancel any in-flight request before starting a new one (user changed ano fast).
+  if(_mirtAbort){try{_mirtAbort.abort()}catch(_e){}}
+  _mirtAbort=new AbortController();
+  const timer=setTimeout(()=>_mirtAbort.abort(),MIRT_FETCH_TIMEOUT_MS);
   total.textContent='(carregando...)';
-  fetch('/api/v5/mirt/availability?ano_referencia='+encodeURIComponent(ano))
-    .then(r=>r.json())
+  badges.innerHTML='';
+  fetch('/api/v5/mirt/availability?ano_referencia='+encodeURIComponent(ano),
+        {signal:_mirtAbort.signal})
+    .then(r=>{clearTimeout(timer);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
     .then(data=>{
       badges.innerHTML='';
       ['LC','CH','CN','MT'].forEach(area=>{
@@ -273,7 +283,19 @@ function refreshMIRTAvailability(){
       });
       total.textContent='('+(data.total_artefatos||0)+' artefato(s))';
     })
-    .catch(()=>{total.textContent='(erro ao consultar)';badges.innerHTML=''});
+    .catch(err=>{
+      clearTimeout(timer);
+      const msg=err&&err.name==='AbortError'?'timeout':'erro';
+      total.textContent='('+msg+')';
+      badges.innerHTML='';
+      const retry=document.createElement('button');
+      retry.className='btn btn-outline';
+      retry.style.fontSize='.75rem';
+      retry.style.padding='.2rem .6rem';
+      retry.textContent='Tentar novamente';
+      retry.onclick=refreshMIRTAvailability;
+      badges.appendChild(retry);
+    });
 }
 
 // ── File ──
