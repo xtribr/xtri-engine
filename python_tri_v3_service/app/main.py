@@ -874,6 +874,131 @@ async def anos_referencia():
     return sorted(tabelas_multiano.keys())
 
 
+def _build_reference_scale_points(
+    tab: "TabelaReferencia", area: str,
+) -> list[PontoReferencia]:
+    """Flatten the (area, acertos) → {tri_min, tri_med, tri_max} table into
+    a list ordered by acertos, suitable for the frontend's anchor graph."""
+    pontos: list[PontoReferencia] = []
+    for acertos in sorted(tab.lookup.get(area, {}).keys()):
+        ref = tab.lookup[area][acertos]
+        pontos.append(PontoReferencia(
+            acertos=acertos,
+            tri_min=ref["tri_min"],
+            tri_med=ref["tri_med"],
+            tri_max=ref["tri_max"],
+        ))
+    return pontos
+
+
+def _fetch_inep_scale_or_empirical_default(
+    ano_referencia: int, area: str,
+) -> tuple[float, float]:
+    """Return (sigma, mu) for the INEP empirical transformação, or the empirical
+    defaults (100, 500) when Supabase is unavailable or missing that row."""
+    sigma_oficial, mu_oficial = 100.0, 500.0
+    if not is_supabase_configured():
+        return sigma_oficial, mu_oficial
+    try:
+        sb = get_supabase()
+        tr = (
+            sb.table("enem_transformacoes")
+            .select("*")
+            .eq("ano", ano_referencia)
+            .eq("area", area)
+            .limit(1)
+            .execute()
+        )
+        if tr.data:
+            sigma_oficial = float(tr.data[0]["sigma"])
+            mu_oficial = float(tr.data[0]["mu"])
+    except Exception:
+        pass
+    return sigma_oficial, mu_oficial
+
+
+def _build_enrichment_payload(
+    raw_results: list[dict],
+    *,
+    diag: dict,
+    tab: "TabelaReferencia",
+    area: str,
+    ano_referencia: int,
+) -> tuple[list[dict], Any, Any]:
+    """Assemble the V2.1 per-student enrichment + methodology + cohort stats.
+
+    Returns (resultados_estruturados, metodologia_banner, coorte_stats). Pure
+    aggregation; all heavy IRT math is already done in ``raw_results``.
+    """
+    all_thetas_list = [float(r["theta"]) for r in raw_results]
+    all_notas_list = [float(r["nota_ancorada"]) for r in raw_results]
+    all_acertos_list = [int(r["acertos"]) for r in raw_results]
+
+    cohort_mean = float(np.mean(all_thetas_list)) if all_thetas_list else 0.0
+    cohort_std_val = float(np.std(all_thetas_list)) if all_thetas_list else 1.0
+
+    sorted_by_nota = sorted(raw_results, key=lambda r: -r["nota_ancorada"])
+    rank_by_id = {r["aluno_id"]: i + 1 for i, r in enumerate(sorted_by_nota)}
+
+    sigma_oficial, mu_oficial = _fetch_inep_scale_or_empirical_default(
+        ano_referencia, area,
+    )
+
+    n_dificeis_total = diag.get("itens_dificeis", 0)
+
+    resultados_estruturados: list[dict] = []
+    for r in raw_results:
+        ref = tab.obter(area, r["acertos"]) if r["acertos"] in tab.lookup.get(area, {}) else {
+            "tri_min": 0, "tri_med": 0, "tri_max": 1000,
+        }
+        estr = build_resultado_estruturado(
+            aluno_id=r["aluno_id"],
+            acertos=r["acertos"],
+            total_itens=diag["n_itens"],
+            theta=r["theta"],
+            se=r.get("se", 0.0),
+            nota=r["nota_ancorada"],
+            cohort_mean=cohort_mean,
+            cohort_std=cohort_std_val,
+            rank_in_cohort=rank_by_id[r["aluno_id"]],
+            total_in_cohort=len(raw_results),
+            area=area,
+            ano=ano_referencia,
+            sigma_oficial=sigma_oficial,
+            mu_oficial=mu_oficial,
+            ref_min=ref["tri_min"],
+            ref_med=ref["tri_med"],
+            ref_max=ref["tri_max"],
+            acert_dif=r.get("acert_dif", 0.0),
+            n_itens_faceis_acertados=r.get("acertos_faceis", 0),
+            n_itens_medios_acertados=r.get("acertos_medios", 0),
+            n_itens_dificeis_acertados=r.get("acertos_dificeis", 0),
+            n_itens_dificeis_total=n_dificeis_total,
+        )
+        resultados_estruturados.append(estr)
+
+    metodologia = build_metodologia_banner(
+        area=area,
+        ano=ano_referencia,
+        n_alunos=len(raw_results),
+        cohort_mean=cohort_mean,
+        cohort_std=cohort_std_val,
+        acertos_medio=float(np.mean(all_acertos_list)) if all_acertos_list else 0.0,
+        n_itens=diag["n_itens"],
+        nota_media=diag["nota_media"],
+    )
+
+    coorte_stats = build_coorte_stats(
+        thetas=all_thetas_list,
+        notas=all_notas_list,
+        acertos=all_acertos_list,
+        n_itens=diag["n_itens"],
+        area=area,
+    )
+
+    return resultados_estruturados, metodologia, coorte_stats
+
+
 @app.post("/api/v3/processar-csv", response_model=ResponseProcessarCSV)
 async def processar_csv(
     area: str = Form(...),
@@ -978,95 +1103,14 @@ async def processar_csv(
         setattr(row, f"acert_dif_{area_lower}", r.get("acert_dif", 0.0))
         resultados.append(row)
 
-    # Build reference scale for the anchor graph
-    referencia: list[PontoReferencia] = []
-    for acertos in sorted(tab.lookup.get(area, {}).keys()):
-        ref = tab.lookup[area][acertos]
-        referencia.append(PontoReferencia(
-            acertos=acertos,
-            tri_min=ref["tri_min"],
-            tri_med=ref["tri_med"],
-            tri_max=ref["tri_max"],
-        ))
+    referencia = _build_reference_scale_points(tab, area)
 
-    # ── V2.1 Enrichment: 9 dimensions per student + methodology banner + cohort stats ──
-    raw_results = resultado["resultados_alunos"]
-    all_thetas_list = [float(r["theta"]) for r in raw_results]
-    all_notas_list = [float(r["nota_ancorada"]) for r in raw_results]
-    all_acertos_list = [int(r["acertos"]) for r in raw_results]
-
-    cohort_mean = float(np.mean(all_thetas_list)) if all_thetas_list else 0.0
-    cohort_std_val = float(np.std(all_thetas_list)) if all_thetas_list else 1.0
-
-    # Rank students within cohort (higher nota = better rank, 1-based)
-    sorted_by_nota = sorted(raw_results, key=lambda r: -r["nota_ancorada"])
-    rank_by_id = {r["aluno_id"]: i + 1 for i, r in enumerate(sorted_by_nota)}
-
-    # Get sigma/mu from supabase if available, else use empirical defaults
-    sigma_oficial, mu_oficial = 100.0, 500.0
-    if is_supabase_configured():
-        try:
-            sb = get_supabase()
-            tr = sb.table("enem_transformacoes").select("*").eq("ano", ano_referencia).eq("area", area).limit(1).execute()
-            if tr.data:
-                sigma_oficial = float(tr.data[0]["sigma"])
-                mu_oficial = float(tr.data[0]["mu"])
-        except Exception:
-            pass
-
-    # Item difficulty subgroup counts (Primi)
-    n_faceis_total = diag.get("itens_faceis", 0)
-    n_medios_total = diag.get("itens_medios", 0)
-    n_dificeis_total = diag.get("itens_dificeis", 0)
-
-    resultados_estruturados: list[dict] = []
-    for r in raw_results:
-        ref = tab.obter(area, r["acertos"]) if r["acertos"] in tab.lookup.get(area, {}) else {
-            "tri_min": 0, "tri_med": 0, "tri_max": 1000
-        }
-        estr = build_resultado_estruturado(
-            aluno_id=r["aluno_id"],
-            acertos=r["acertos"],
-            total_itens=diag["n_itens"],
-            theta=r["theta"],
-            se=r.get("se", 0.0),
-            nota=r["nota_ancorada"],
-            cohort_mean=cohort_mean,
-            cohort_std=cohort_std_val,
-            rank_in_cohort=rank_by_id[r["aluno_id"]],
-            total_in_cohort=len(raw_results),
-            area=area,
-            ano=ano_referencia,
-            sigma_oficial=sigma_oficial,
-            mu_oficial=mu_oficial,
-            ref_min=ref["tri_min"],
-            ref_med=ref["tri_med"],
-            ref_max=ref["tri_max"],
-            acert_dif=r.get("acert_dif", 0.0),
-            n_itens_faceis_acertados=r.get("acertos_faceis", 0),
-            n_itens_medios_acertados=r.get("acertos_medios", 0),
-            n_itens_dificeis_acertados=r.get("acertos_dificeis", 0),
-            n_itens_dificeis_total=n_dificeis_total,
-        )
-        resultados_estruturados.append(estr)
-
-    metodologia = build_metodologia_banner(
+    resultados_estruturados, metodologia, coorte_stats = _build_enrichment_payload(
+        resultado["resultados_alunos"],
+        diag=diag,
+        tab=tab,
         area=area,
-        ano=ano_referencia,
-        n_alunos=len(raw_results),
-        cohort_mean=cohort_mean,
-        cohort_std=cohort_std_val,
-        acertos_medio=float(np.mean(all_acertos_list)) if all_acertos_list else 0.0,
-        n_itens=diag["n_itens"],
-        nota_media=diag["nota_media"],
-    )
-
-    coorte_stats = build_coorte_stats(
-        thetas=all_thetas_list,
-        notas=all_notas_list,
-        acertos=all_acertos_list,
-        n_itens=diag["n_itens"],
-        area=area,
+        ano_referencia=ano_referencia,
     )
 
     elapsed = time.time() - t0
@@ -1410,79 +1454,60 @@ async def calcular_com_inep(payload: RequestCalcularComINEP):
     )
 
 
-@app.post("/api/v4/enem/validar-simulado", response_model=ResponseValidarSimulado)
-async def validar_simulado(
-    area: str = Form(...),
-    ano: int = Form(...),
-    co_prova: int = Form(...),
-    arquivo: UploadFile = File(...),
-    tp_lingua: Optional[int] = Form(None),
-):
+_AREA_OFFSETS = {"LC": 1, "CH": 46, "CN": 91, "MT": 136}
+
+
+def _load_inep_items_for_prova(
+    client: Any,
+    *,
+    ano: int,
+    area: str,
+    co_prova: int,
+    tp_lingua: Optional[int],
+) -> tuple[dict, list[dict]]:
+    """Fetch INEP transformação + calibrated items for one (ano, area, co_prova).
+
+    Returns (transf_row, inep_items sorted by posicao). Items with missing
+    parameters or abandonado=True are dropped. For LC, filters by tp_lingua.
+    Raises HTTPException(404) when transformação or prova is missing, or (400)
+    when fewer than 10 valid items remain.
     """
-    Valida um simulado executando dois cálculos paralelos nos MESMOS alunos:
-
-    1. V3 — Calibração LOCAL do XTRI Engine (calibra itens do próprio simulado)
-    2. V4 — Parâmetros OFICIAIS INEP (do Supabase) + transformação empírica
-
-    Retorna comparação lado-a-lado para medir o quão próximo nossa calibração
-    local está do ground truth INEP.
-    """
-    t0 = time.time()
-    area = area.upper()
-    avisos: list[str] = []
-
-    if area not in ("LC", "CH", "CN", "MT"):
-        raise HTTPException(status_code=400, detail=f"Área inválida: {area}")
-
-    if area == "LC" and tp_lingua not in (0, 1):
-        raise HTTPException(
-            status_code=400,
-            detail="Para área LC é obrigatório fornecer tp_lingua (0=inglês, 1=espanhol)",
-        )
-
-    client = _require_supabase()
-
-    # ── 1. Parse upload ──
-    raw = await arquivo.read()
-    filename = (arquivo.filename or "").lower()
-    is_xlsx = filename.endswith(".xlsx") or filename.endswith(".xls")
-    try:
-        if is_xlsx:
-            parsed = parse_single_area(raw, is_xlsx=True)
-        else:
-            try:
-                content = raw.decode("utf-8-sig")
-            except UnicodeDecodeError:
-                content = raw.decode("latin-1")
-            parsed = parse_single_area(content, is_xlsx=False)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Erro no parsing: {e}")
-
-    avisos.extend(parsed["avisos"])
-    alunos_parsed = parsed["alunos"]
-    if len(alunos_parsed) < 10:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Mínimo 10 alunos. Recebido: {len(alunos_parsed)}",
-        )
-
-    # ── 2. Load INEP item bank for the specified prova ──
-    transf_r = client.table("enem_transformacoes").select("*").eq("ano", ano).eq("area", area).limit(1).execute()
+    transf_r = (
+        client.table("enem_transformacoes")
+        .select("*")
+        .eq("ano", ano)
+        .eq("area", area)
+        .limit(1)
+        .execute()
+    )
     if not transf_r.data:
         raise HTTPException(
             status_code=404,
             detail=f"Transformação empírica não disponível para {area}/{ano}",
         )
     transf_row = transf_r.data[0]
-    sigma = float(transf_row["sigma"])
-    mu = float(transf_row["mu"])
 
-    itens_area_r = client.table("enem_itens").select("*").eq("ano", ano).eq("area", area).execute()
+    itens_area_r = (
+        client.table("enem_itens")
+        .select("*")
+        .eq("ano", ano)
+        .eq("area", area)
+        .execute()
+    )
     itens_by_co = {it["co_item"]: it for it in itens_area_r.data}
 
-    maps_r = client.table("enem_itens_prova").select("*").eq("ano", ano).eq("co_prova", co_prova).execute()
+    maps_r = (
+        client.table("enem_itens_prova")
+        .select("*")
+        .eq("ano", ano)
+        .eq("co_prova", co_prova)
+        .execute()
+    )
     if not maps_r.data:
-        raise HTTPException(status_code=404, detail=f"Prova {co_prova} não encontrada para {area}/{ano}")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Prova {co_prova} não encontrada para {area}/{ano}",
+        )
 
     all_items: list[dict] = []
     for m in maps_r.data:
@@ -1500,58 +1525,45 @@ async def validar_simulado(
         })
 
     if area == "LC":
-        inep_items = [it for it in all_items if it.get("tp_lingua") is None or it.get("tp_lingua") == tp_lingua]
+        inep_items = [
+            it for it in all_items
+            if it.get("tp_lingua") is None or it.get("tp_lingua") == tp_lingua
+        ]
     else:
         inep_items = all_items
 
     inep_items.sort(key=lambda x: x["posicao"])
-    n_itens = len(inep_items)
 
-    if n_itens < 10:
-        raise HTTPException(status_code=400, detail=f"Poucos itens INEP válidos: {n_itens}")
-
-    # ── 3. Validate / align response lengths via position mapping ──
-    # Arquivo do simulado tem respostas posição-a-posição na área (typicamente 45)
-    # Item bank INEP pode ter menos itens (alguns abandonados)
-    # Solução: mapear cada item do banco à sua posição no vetor do aluno
-    offset_area = {"LC": 1, "CH": 46, "CN": 91, "MT": 136}[area]
-    file_n_itens = parsed["n_itens"]
-    if file_n_itens < 30:
+    if len(inep_items) < 10:
         raise HTTPException(
             status_code=400,
-            detail=f"Arquivo tem apenas {file_n_itens} itens por aluno, mínimo 30.",
+            detail=f"Poucos itens INEP válidos: {len(inep_items)}",
         )
 
-    # ── 4. Run V3 — local calibration ──
-    tabela = tabelas_multiano.get(ano) or tabelas_multiano.get(2022)
-    if tabela is None:
-        raise HTTPException(status_code=500, detail="Tabela de referência multi-ano não carregada")
+    return transf_row, inep_items
 
-    alunos_motor = [
-        {"aluno_id": a["aluno_id"], "nome": "", "respostas": a["respostas"]}
-        for a in alunos_parsed
-    ]
 
-    try:
-        resultado_v3 = pipeline_cientifico(
-            alunos=alunos_motor,
-            area=area,
-            tabela=tabela,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro na calibração V3: {e}")
+def _score_alunos_with_inep_items(
+    alunos_parsed: list[dict],
+    *,
+    inep_items: list[dict],
+    offset_area: int,
+    sigma: float,
+    mu: float,
+) -> Dict[str, Dict[str, Any]]:
+    """Score each aluno with INEP official parameters using position-aligned responses.
 
-    v3_by_id = {r["aluno_id"]: r for r in resultado_v3["resultados_alunos"]}
-
-    # ── 5. Run V4 — INEP official parameters with position mapping ──
+    Each aluno's response vector is aligned to INEP items by position
+    (offset_area maps the first file column to a 1-indexed ENEM position).
+    Alunos with fewer than 10 aligned items are skipped.
+    """
     v4_results: Dict[str, Dict[str, Any]] = {}
     for aluno in alunos_parsed:
-        resp_vec = aluno["respostas"]  # length = file_n_itens (typically 45)
-        # Align with INEP items by position
-        aligned_binary = []
-        aligned_items = []
+        resp_vec = aluno["respostas"]
+        aligned_binary: list[int] = []
+        aligned_items: list[dict] = []
         for it in inep_items:
-            str_idx = it["posicao"] - offset_area  # 0-indexed into area vector
+            str_idx = it["posicao"] - offset_area
             if 0 <= str_idx < len(resp_vec):
                 aligned_binary.append(resp_vec[str_idx])
                 aligned_items.append(it)
@@ -1560,21 +1572,28 @@ async def validar_simulado(
         resp = np.array(aligned_binary, dtype=int)
         acertos = int(resp.sum())
         theta, _se = eap_theta_cientifico(resp, aligned_items)
-        nota = sigma * theta + mu
-        nota = round(float(nota), 1)
+        nota = round(float(sigma * theta + mu), 1)
         v4_results[aluno["aluno_id"]] = {
             "theta": round(float(theta), 4),
             "nota": nota,
             "estado": estado_tri(nota),
             "acertos": acertos,
         }
+    return v4_results
 
-    # ── 6. Build comparison ──
+
+def _build_validation_comparison(
+    alunos_parsed: list[dict],
+    *,
+    v3_by_id: Dict[str, Dict[str, Any]],
+    v4_results: Dict[str, Dict[str, Any]],
+) -> tuple[list[ResultadoComparacao], EstatisticasComparacao]:
+    """Pair per-aluno V3 and V4 scores and compute aggregate agreement stats."""
     comparacoes: list[ResultadoComparacao] = []
-    diffs = []
+    diffs: list[float] = []
+    notas_v3_list: list[float] = []
+    notas_v4_list: list[float] = []
     concordancia = 0
-    notas_v3_list = []
-    notas_v4_list = []
 
     for aluno in alunos_parsed:
         aid = aluno["aluno_id"]
@@ -1607,22 +1626,120 @@ async def validar_simulado(
     notas_v3_arr = np.array(notas_v3_list)
     notas_v4_arr = np.array(notas_v4_list)
 
-    # Correlation (handle edge cases)
     if len(notas_v3_arr) >= 2 and notas_v3_arr.std() > 0 and notas_v4_arr.std() > 0:
         correlacao = float(np.corrcoef(notas_v3_arr, notas_v4_arr)[0, 1])
     else:
         correlacao = 0.0
 
+    n = len(comparacoes)
     estatisticas = EstatisticasComparacao(
-        n_alunos=len(comparacoes),
-        mae=round(float(np.mean(np.abs(diffs_arr))), 2),
-        rmse=round(float(np.sqrt(np.mean(diffs_arr ** 2))), 2),
+        n_alunos=n,
+        mae=round(float(np.mean(np.abs(diffs_arr))), 2) if n else 0.0,
+        rmse=round(float(np.sqrt(np.mean(diffs_arr ** 2))), 2) if n else 0.0,
         correlacao=round(correlacao, 6),
-        mean_diff=round(float(np.mean(diffs_arr)), 2),
-        max_diff_abs=round(float(np.max(np.abs(diffs_arr))), 2),
-        pct_concordancia_nivel=round(concordancia / len(comparacoes) * 100, 2) if comparacoes else 0.0,
-        nota_media_v3=round(float(np.mean(notas_v3_arr)), 1),
-        nota_media_v4=round(float(np.mean(notas_v4_arr)), 1),
+        mean_diff=round(float(np.mean(diffs_arr)), 2) if n else 0.0,
+        max_diff_abs=round(float(np.max(np.abs(diffs_arr))), 2) if n else 0.0,
+        pct_concordancia_nivel=round(concordancia / n * 100, 2) if n else 0.0,
+        nota_media_v3=round(float(np.mean(notas_v3_arr)), 1) if n else 0.0,
+        nota_media_v4=round(float(np.mean(notas_v4_arr)), 1) if n else 0.0,
+    )
+    return comparacoes, estatisticas
+
+
+@app.post("/api/v4/enem/validar-simulado", response_model=ResponseValidarSimulado)
+async def validar_simulado(
+    area: str = Form(...),
+    ano: int = Form(...),
+    co_prova: int = Form(...),
+    arquivo: UploadFile = File(...),
+    tp_lingua: Optional[int] = Form(None),
+):
+    """
+    Valida um simulado executando dois cálculos paralelos nos MESMOS alunos:
+
+    1. V3 — Calibração LOCAL do XTRI Engine (calibra itens do próprio simulado)
+    2. V4 — Parâmetros OFICIAIS INEP (do Supabase) + transformação empírica
+
+    Retorna comparação lado-a-lado para medir o quão próximo nossa calibração
+    local está do ground truth INEP.
+    """
+    t0 = time.time()
+    area = area.upper()
+    avisos: list[str] = []
+
+    if area not in ("LC", "CH", "CN", "MT"):
+        raise HTTPException(status_code=400, detail=f"Área inválida: {area}")
+
+    if area == "LC" and tp_lingua not in (0, 1):
+        raise HTTPException(
+            status_code=400,
+            detail="Para área LC é obrigatório fornecer tp_lingua (0=inglês, 1=espanhol)",
+        )
+
+    client = _require_supabase()
+
+    # Parse upload
+    raw = await arquivo.read()
+    filename = (arquivo.filename or "").lower()
+    is_xlsx = filename.endswith(".xlsx") or filename.endswith(".xls")
+    try:
+        if is_xlsx:
+            parsed = parse_single_area(raw, is_xlsx=True)
+        else:
+            try:
+                content = raw.decode("utf-8-sig")
+            except UnicodeDecodeError:
+                content = raw.decode("latin-1")
+            parsed = parse_single_area(content, is_xlsx=False)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Erro no parsing: {e}")
+
+    avisos.extend(parsed["avisos"])
+    alunos_parsed = parsed["alunos"]
+    if len(alunos_parsed) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Mínimo 10 alunos. Recebido: {len(alunos_parsed)}",
+        )
+    if parsed["n_itens"] < 30:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Arquivo tem apenas {parsed['n_itens']} itens por aluno, mínimo 30.",
+        )
+
+    transf_row, inep_items = _load_inep_items_for_prova(
+        client, ano=ano, area=area, co_prova=co_prova, tp_lingua=tp_lingua,
+    )
+    sigma = float(transf_row["sigma"])
+    mu = float(transf_row["mu"])
+    n_itens = len(inep_items)
+
+    # V3 — local calibration
+    tabela = tabelas_multiano.get(ano) or tabelas_multiano.get(2022)
+    if tabela is None:
+        raise HTTPException(status_code=500, detail="Tabela de referência multi-ano não carregada")
+
+    alunos_motor = [
+        {"aluno_id": a["aluno_id"], "nome": "", "respostas": a["respostas"]}
+        for a in alunos_parsed
+    ]
+    try:
+        resultado_v3 = pipeline_cientifico(alunos=alunos_motor, area=area, tabela=tabela)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro na calibração V3: {e}")
+    v3_by_id = {r["aluno_id"]: r for r in resultado_v3["resultados_alunos"]}
+
+    # V4 — INEP official parameters
+    v4_results = _score_alunos_with_inep_items(
+        alunos_parsed,
+        inep_items=inep_items,
+        offset_area=_AREA_OFFSETS[area],
+        sigma=sigma,
+        mu=mu,
+    )
+
+    comparacoes, estatisticas = _build_validation_comparison(
+        alunos_parsed, v3_by_id=v3_by_id, v4_results=v4_results,
     )
 
     transformacao_model = TransformacaoENEM(
