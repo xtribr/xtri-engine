@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.microdata.report import (
     DEFAULT_MODEL,
+    MAX_TOKENS,
     _pick_difficulty_highlights,
     build_payload,
     build_prompt,
@@ -205,7 +206,7 @@ class TestGenerateReport:
         instance = instance_holder["last"]
         kwargs = instance.messages.last_kwargs
         assert kwargs["model"] == DEFAULT_MODEL
-        assert kwargs["max_tokens"] == 4096
+        assert kwargs["max_tokens"] == MAX_TOKENS
         assert len(kwargs["messages"]) == 1
         user_msg = kwargs["messages"][0]
         assert user_msg["role"] == "user"
