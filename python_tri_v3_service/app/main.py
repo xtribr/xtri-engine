@@ -101,7 +101,12 @@ from .enriquecimento import (
     NACIONAL_STATS,
 )
 from .storage.artifacts import save_unidim_artifact
-from .storage.model_registry import get_active_model, list_active_models, set_active_model
+from .storage.model_registry import (
+    get_active_model,
+    list_active_models,
+    list_active_models_by_family,
+    set_active_model,
+)
 from .runtime.local_paths import describe_runtime_layout, ensure_app_support_layout
 from .runtime.unidim import (
     RuntimeArtifactAmbiguousError,
@@ -828,6 +833,29 @@ async def estimar_theta_mirt(payload: RequestEstimarThetaMIRT):
                 status_code=400,
                 detail=f"{exc} Nenhum fallback unidimensional disponível: {fallback_exc}",
             )
+
+
+@app.get("/api/v5/mirt/availability")
+async def mirt_availability(ano_referencia: int = 2024):
+    """Per-area availability of MIRT artifacts for a given reference year.
+
+    Frontend calls this on page load to render the 'MIRT Avançado' status
+    card. Returns a boolean per LC/CH/CN/MT plus the total count. Default
+    scoring flow is unaffected — this endpoint only reports what's there.
+    """
+    artefatos = list_active_models_by_family(
+        family="mirt", ano_referencia=ano_referencia,
+    )
+    disponibilidade = {"LC": False, "CH": False, "CN": False, "MT": False}
+    for a in artefatos:
+        area = str(a.get("area", "")).upper()
+        if area in disponibilidade:
+            disponibilidade[area] = True
+    return {
+        "ano_referencia": ano_referencia,
+        "disponibilidade": disponibilidade,
+        "total_artefatos": len(artefatos),
+    }
 
 
 # ════════════════════════════════════════════════════════════════════════════════

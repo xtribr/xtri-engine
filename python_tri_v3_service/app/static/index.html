@@ -137,6 +137,20 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
     </div>
   </div>
 
+  <!-- MIRT availability (advanced, collapsed by default) -->
+  <details class="card" id="mirtCard" style="font-size:.9rem;padding:1rem 1.5rem">
+    <summary style="cursor:pointer;font-weight:600;color:#2c3e50;list-style:none">
+      MIRT Avançado <span id="mirtTotal" class="tune-note" style="font-weight:normal">(carregando...)</span>
+    </summary>
+    <div style="padding-top:.8rem">
+      <div class="tune-note" style="margin-bottom:.6rem;color:#555">
+        Artefatos MIRT locais para o ano selecionado. Scoring padrão permanece 2PL unidimensional
+        — MIRT é opt-in via <code>POST /api/v5/mirt/estimar-theta</code> com <code>permitir_fallback_unidim=true</code>.
+      </div>
+      <div id="mirtBadges" style="display:flex;gap:.5rem;flex-wrap:wrap"></div>
+    </div>
+  </details>
+
   <div class="status" id="status"><div class="spinner"></div><p id="statusMsg">Calibrando...</p></div>
   <div class="error" id="errorBox"></div>
   <details class="warnings" id="warningsBox"><summary>Avisos (<span id="warnCount">0</span>)</summary><ul id="warnList"></ul></details>
@@ -233,7 +247,34 @@ fetch('/api/v3/anos-referencia').then(r=>r.json()).then(anos=>{
   const s=$('#ano');s.innerHTML='';
   anos.forEach(a=>{const o=document.createElement('option');o.value=a;o.textContent=a;s.appendChild(o)});
   s.value=anos[anos.length-1];checkReady();
+  refreshMIRTAvailability();
 }).catch(()=>{$('#ano').innerHTML='<option>Erro</option>'});
+
+// ── MIRT availability (advanced, opt-in) ──
+function refreshMIRTAvailability(){
+  const ano=$('#ano').value||2024;
+  const badges=$('#mirtBadges');const total=$('#mirtTotal');
+  if(!badges||!total)return;
+  total.textContent='(carregando...)';
+  fetch('/api/v5/mirt/availability?ano_referencia='+encodeURIComponent(ano))
+    .then(r=>r.json())
+    .then(data=>{
+      badges.innerHTML='';
+      ['LC','CH','CN','MT'].forEach(area=>{
+        const disp=!!(data.disponibilidade&&data.disponibilidade[area]);
+        const span=document.createElement('span');
+        span.className='badge';
+        span.style.background=disp?'#27ae60':'#95a5a6';
+        span.textContent=area+(disp?' ✓':' —');
+        span.title=disp
+          ?('Artefato MIRT disponível ('+ano+'/'+area+')')
+          :('Sem artefato MIRT local ('+ano+'/'+area+') — fallback unidim ativo');
+        badges.appendChild(span);
+      });
+      total.textContent='('+(data.total_artefatos||0)+' artefato(s))';
+    })
+    .catch(()=>{total.textContent='(erro ao consultar)';badges.innerHTML=''});
+}
 
 // ── File ──
 const zone=$('#dropZone'),input=$('#fileInput'),fname=$('#fname');
@@ -583,7 +624,7 @@ async function updateV4Fields(){
 
 document.querySelectorAll('input[name="mode"]').forEach(el=>el.addEventListener('change',updateV4Fields));
 $('#area').addEventListener('change',updateV4Fields);
-$('#ano').addEventListener('change',updateV4Fields);
+$('#ano').addEventListener('change',()=>{updateV4Fields();refreshMIRTAvailability()});
 
 let lastFileName='';
 

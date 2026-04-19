@@ -175,6 +175,82 @@ class TestPrepareAndJob:
         submit_mock.assert_called_once()
 
 
+class TestMIRTAvailability:
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self, temp_model_storage):
+        """Empty the shared model registry around each test in this class.
+
+        `temp_model_storage` is session-scoped, so other tests may have
+        populated it. Reset to a known-empty state before and after.
+        """
+        registry_path = temp_model_storage / "models" / "active_models.json"
+        snapshot = registry_path.read_bytes() if registry_path.is_file() else None
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text("{}", encoding="utf-8")
+        try:
+            yield
+        finally:
+            if snapshot is None:
+                registry_path.unlink(missing_ok=True)
+            else:
+                registry_path.write_bytes(snapshot)
+
+    @pytest.mark.api
+    def test_empty_registry_reports_all_false(self, client, temp_model_storage):
+        r = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ano_referencia"] == 2024
+        assert data["disponibilidade"] == {"LC": False, "CH": False, "CN": False, "MT": False}
+        assert data["total_artefatos"] == 0
+
+    @pytest.mark.api
+    def test_detects_mirt_artifact_per_area(self, client, temp_model_storage):
+        set_active_model(
+            {
+                "artifact_id": "job_mirt_mt_001",
+                "artifact_dir": str(temp_model_storage / "models" / "mirt" / "2024" / "MT"),
+                "simulado_id": "sim-mirt",
+                "scope_type": "simulado_id",
+                "scope_id": "sim-mirt",
+                "ano_referencia": 2024,
+                "area": "MT",
+                "modelo": "mirt_bifactor_mt_v1",
+                "saved_at_utc": "2026-04-19T00:00:00+00:00",
+            },
+            modelo="mirt_bifactor_mt_v1",
+        )
+
+        r = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["disponibilidade"]["MT"] is True
+        assert data["disponibilidade"]["LC"] is False
+        assert data["total_artefatos"] == 1
+
+    @pytest.mark.api
+    def test_filters_by_ano_referencia(self, client, temp_model_storage):
+        set_active_model(
+            {
+                "artifact_id": "job_mirt_lc_2023",
+                "artifact_dir": str(temp_model_storage / "models" / "mirt" / "2023" / "LC"),
+                "simulado_id": "sim-lc-2023",
+                "scope_type": "simulado_id",
+                "scope_id": "sim-lc-2023",
+                "ano_referencia": 2023,
+                "area": "LC",
+                "modelo": "mirt_bifactor_lc_v1",
+                "saved_at_utc": "2026-04-19T00:00:00+00:00",
+            },
+            modelo="mirt_bifactor_lc_v1",
+        )
+
+        r_2024 = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r_2024.json()["disponibilidade"]["LC"] is False
+        r_2023 = client.get("/api/v5/mirt/availability?ano_referencia=2023")
+        assert r_2023.json()["disponibilidade"]["LC"] is True
+
+
 class TestRuntimeStatus:
     @pytest.mark.api
     def test_runtime_status_explica_fallback_sem_modelo(self, client, temp_model_storage):
