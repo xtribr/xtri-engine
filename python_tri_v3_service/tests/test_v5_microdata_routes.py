@@ -103,6 +103,60 @@ class TestPrepareAndJob:
         assert "Unknown job_id" in r.json()["detail"]
 
     @pytest.mark.api
+    def test_job_lifecycle_reflects_status_transitions(self, client):
+        """GET /job/{id} surfaces queued → running → done transitions."""
+        job = job_manager.create(year=2024, sample_size=1000, rng_seed=7)
+
+        # queued
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["job_id"] == job.job_id
+        assert data["status"] == "queued"
+        assert data["progress"] == 0.0
+        assert data["started_at"] is None
+
+        # running
+        job_manager.mark_running(job.job_id)
+        job_manager.update_progress(job.job_id, progress=0.42, stage="calibrating_LC")
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        data = r.json()
+        assert data["status"] == "running"
+        assert data["progress"] == pytest.approx(0.42)
+        assert data["stage"] == "calibrating_LC"
+        assert data["started_at"] is not None
+        assert data["elapsed_seconds"] is not None and data["elapsed_seconds"] >= 0
+
+        # done
+        from app.microdata.cache import CacheKey
+        fake_key = CacheKey(
+            year=2024,
+            source_hash="abcd1234abcd1234",
+            filters_hash="deadbeef",
+            stage="calibrated",
+        )
+        job_manager.mark_done(job.job_id, result_key=fake_key)
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        data = r.json()
+        assert data["status"] == "done"
+        assert data["progress"] == 1.0
+        assert data["stage"] == "done"
+        assert data["error"] is None
+
+    @pytest.mark.api
+    def test_job_error_path_surfaces_message(self, client):
+        """mark_error surfaces the error message via the job endpoint."""
+        job = job_manager.create(year=2024, sample_size=500, rng_seed=1)
+        job_manager.mark_running(job.job_id)
+        job_manager.mark_error(job.job_id, "CSV malformed at row 42")
+
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "error"
+        assert data["error"] == "CSV malformed at row 42"
+
+    @pytest.mark.api
     def test_prepare_envia_pipeline_para_dispatcher_dedicado(self, client, tmp_path):
         csv_path = tmp_path / "MICRODADOS_ENEM_2024.csv"
         csv_path.write_text("NU_INSCRICAO,TP_PRESENCA_CN\n1,1\n", encoding="utf-8")
