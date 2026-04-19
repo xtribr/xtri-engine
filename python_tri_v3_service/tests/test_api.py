@@ -791,6 +791,67 @@ def _make_single_area_csv(n: int = 30, n_itens: int = 45) -> str:
     return "\n".join(lines)
 
 
+def _make_area_file(
+    n: int = 15,
+    *,
+    n_itens: int = 45,
+    delimiter: str = ",",
+    with_header: bool = True,
+    with_id: bool = True,
+    header_style: str = "numeric",  # "numeric" → "1,2,..."; "questao" → "Questao 1,..."
+    as_xlsx: bool = False,
+    seed: int = 42,
+):
+    """Build a synthetic response file in any of the supported shapes.
+
+    Returns bytes (for XLSX) or str (for delimited text). The parser
+    is expected to handle all (delimiter × header × id × format) combos,
+    so this helper drives the format matrix.
+    """
+    import numpy as np
+    rng = np.random.default_rng(seed)
+    data_rows: list[list[str]] = []
+    for i in range(n):
+        respostas = [str(int(rng.random() > 0.5)) for _ in range(n_itens)]
+        row = ([f"S{i:03d}"] if with_id else []) + respostas
+        data_rows.append(row)
+
+    if as_xlsx:
+        import openpyxl
+        from io import BytesIO
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        if with_header:
+            header_cells: list = []
+            if with_id:
+                header_cells.append("ID")
+            if header_style == "questao":
+                header_cells.extend([f"Questao {i}" for i in range(1, n_itens + 1)])
+            else:
+                header_cells.extend(list(range(1, n_itens + 1)))
+            ws.append(header_cells)
+        for row in data_rows:
+            ws.append([int(c) if c.isdigit() and (not with_id or idx > 0) else c
+                       for idx, c in enumerate(row)])
+        buf = BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
+    lines: list[str] = []
+    if with_header:
+        header_row: list[str] = []
+        if with_id:
+            header_row.append("ID")
+        if header_style == "questao":
+            header_row.extend([f"Questao {i}" for i in range(1, n_itens + 1)])
+        else:
+            header_row.extend([str(i) for i in range(1, n_itens + 1)])
+        lines.append(delimiter.join(header_row))
+    for row in data_rows:
+        lines.append(delimiter.join(row))
+    return "\n".join(lines)
+
+
 class TestAnosReferencia:
 
     @pytest.mark.api
@@ -872,6 +933,134 @@ class TestProcessarCSV:
             files={"arquivo": ("small.csv", csv_content, "text/csv")},
         )
         assert resp.status_code == 400
+
+
+class TestProcessarCSVFormatMatrix:
+    """End-to-end HTTP coverage of the (delimiter × header × id × format) grid.
+
+    The parser unit tests (``test_csv_parser.py``) cover individual parsing
+    paths; this class confirms that each shape actually flows through the
+    ``/api/v3/processar-csv`` handler and produces a calibrated response.
+    Drives the brittleness concern from task_plan.md Phase 1-3 that was
+    never closed out after Phase 4/5 superseded the original test plan.
+    """
+
+    @pytest.fixture(scope="class")
+    def ano(self, client: TestClient) -> int:
+        return client.get("/api/v3/anos-referencia").json()[-1]
+
+    @pytest.mark.api
+    @pytest.mark.parametrize(
+        "delimiter,label",
+        [(",", "csv-comma"), ("\t", "tsv-tab"), (";", "scsv-semicolon")],
+    )
+    def test_delimiter_variants(
+        self, client: TestClient, ano: int, delimiter: str, label: str,
+    ):
+        """Comma, tab, and semicolon delimiters all reach a successful response."""
+        content = _make_area_file(n=20, delimiter=delimiter, with_header=True, with_id=True)
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": (f"{label}.csv", content, "text/csv")},
+        )
+        assert resp.status_code == 200, f"{label}: {resp.text[:200]}"
+        body = resp.json()
+        assert body["n_alunos"] >= 18, f"{label}: only {body['n_alunos']}/20"
+        assert body["resultados"][0]["aluno_id"] == "S000"
+
+    @pytest.mark.api
+    @pytest.mark.parametrize("with_header", [True, False])
+    @pytest.mark.parametrize("with_id", [True, False])
+    def test_header_and_id_combinations(
+        self, client: TestClient, ano: int, with_header: bool, with_id: bool,
+    ):
+        """Headered/headerless × with-id/without-id all process successfully.
+
+        Headerless detection reads the first row; without an ID column, the
+        handler should synthesize ``aluno_N`` IDs.
+        """
+        content = _make_area_file(
+            n=20, delimiter=",", with_header=with_header, with_id=with_id,
+        )
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": ("test.csv", content, "text/csv")},
+        )
+        assert resp.status_code == 200, (
+            f"header={with_header} id={with_id}: {resp.text[:200]}"
+        )
+        body = resp.json()
+        # Calibration can drop students with degenerate response patterns
+        # (all-0/all-1 or unresolved theta); 90% survival is the floor.
+        assert body["n_alunos"] >= 18, (
+            f"header={with_header} id={with_id}: only {body['n_alunos']}/20"
+        )
+        first_id = body["resultados"][0]["aluno_id"]
+        if with_id:
+            assert first_id.startswith("S")
+        else:
+            assert first_id.startswith("aluno_")
+
+    @pytest.mark.api
+    def test_questao_style_header(self, client: TestClient, ano: int):
+        """'Questao 1', 'Questao 2', ... headers parse as question columns."""
+        content = _make_area_file(
+            n=20, delimiter=",", with_header=True, with_id=True, header_style="questao",
+        )
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": ("questao.csv", content, "text/csv")},
+        )
+        assert resp.status_code == 200, resp.text[:200]
+        assert resp.json()["n_alunos"] >= 18
+
+    @pytest.mark.api
+    def test_xlsx_round_trip(self, client: TestClient, ano: int):
+        """XLSX uploads go through openpyxl and produce a calibrated response."""
+        content = _make_area_file(n=20, with_header=True, with_id=True, as_xlsx=True)
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={
+                "arquivo": (
+                    "test.xlsx",
+                    content,
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                ),
+            },
+        )
+        assert resp.status_code == 200, resp.text[:200]
+        assert resp.json()["n_alunos"] >= 18
+
+    @pytest.mark.api
+    def test_utf8_bom_is_tolerated(self, client: TestClient, ano: int):
+        """UTF-8 with BOM (common Excel export) decodes correctly."""
+        content = _make_area_file(n=20, delimiter=",", with_header=True, with_id=True)
+        bom_bytes = b"\xef\xbb\xbf" + content.encode("utf-8")
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": ("bom.csv", bom_bytes, "text/csv")},
+        )
+        assert resp.status_code == 200, resp.text[:200]
+        assert resp.json()["n_alunos"] >= 18
+
+    @pytest.mark.api
+    def test_latin1_encoding_is_tolerated(self, client: TestClient, ano: int):
+        """Latin-1 fallback for files that aren't valid UTF-8."""
+        content = _make_area_file(n=20, delimiter=",", with_header=True, with_id=True)
+        # Replace a student id with a non-UTF8 byte sequence (Latin-1 only)
+        mangled = content.replace("S003", "A\xe7\xe3o").encode("latin-1")
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano)},
+            files={"arquivo": ("latin1.csv", mangled, "text/csv")},
+        )
+        assert resp.status_code == 200, resp.text[:200]
+        assert resp.json()["n_alunos"] >= 18
 
 
 class TestFrontendStatic:
