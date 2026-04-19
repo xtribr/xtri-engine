@@ -15,3 +15,8 @@ build/
 # Phase 8: user drops the 1.6 GB MICRODADOS_ENEM_<year>.csv files here.
 # Root-scoped (/microdata/) so it does NOT match python_tri_v3_service/app/microdata/.
 /microdata/
+
+# Local UI/e2e debugging artifacts — not part of the .app bundle.
+.playwright-cli/
+.tmp_ui_test/
+tmp/
