@@ -89,7 +89,13 @@ def _fresh_app() -> desktop_app.XTRIEngine:
 
 
 class _FakeServer:
-    """Minimal stand-in for ``_XTRIServer`` — counts start/stop, blocks until told."""
+    """Minimal stand-in for ``_XTRIServer`` — counts start/stop, blocks until told.
+
+    CAUTION: ``run_duration > 0`` means ``should_exit`` is NOT checked during the
+    initial ``time.sleep`` — anyone extending this with a non-zero duration AND
+    calling ``_stop_backend`` in that window will block for the full duration.
+    For robust early-exit, replace the sleep with an Event.wait(timeout=...).
+    """
 
     def __init__(self, *, run_duration: float = 0.0) -> None:
         self.should_exit = False
@@ -200,9 +206,7 @@ class TestReadinessProbe:
         monkeypatch.setattr(
             desktop_app.httpx,
             "get",
-            lambda url, timeout: (_ for _ in ()).throw(
-                desktop_app.httpx.ConnectError("nobody listening")
-            ),
+            mock.Mock(side_effect=desktop_app.httpx.ConnectError("nobody listening")),
         )
         monkeypatch.setattr(desktop_app, "POLL_INTERVAL_S", 0.01)
 
@@ -222,9 +226,7 @@ class TestReadinessProbe:
         monkeypatch.setattr(
             desktop_app.httpx,
             "get",
-            lambda url, timeout: (_ for _ in ()).throw(
-                desktop_app.httpx.ConnectError("never responds")
-            ),
+            mock.Mock(side_effect=desktop_app.httpx.ConnectError("never responds")),
         )
         monkeypatch.setattr(desktop_app, "STARTUP_TIMEOUT_S", 0.15)
         monkeypatch.setattr(desktop_app, "POLL_INTERVAL_S", 0.01)
@@ -259,6 +261,14 @@ class TestExitHooks:
         """Window-close must route through request_exit so on_exit actually fires.
 
         Calling self.exit() directly would bypass on_exit and leave uvicorn running.
+
+        Note: this only verifies the dispatch path (window-close → request_exit).
+        It does NOT verify that toga.App actually has a ``request_exit`` method in
+        production — the dummy toga.App in this file has no methods at all, so we
+        monkey-patch the attribute onto the instance. A rename here from
+        ``request_exit`` to something else would still be caught because the
+        assert_called_once_with would fail; but we rely on Toga's real surface to
+        keep request_exit available, which is verified by ``briefcase dev``.
         """
         app = _fresh_app()
         app.request_exit = mock.Mock()
