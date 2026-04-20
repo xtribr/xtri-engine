@@ -30,19 +30,29 @@ def calibrar_itens(
     resp_matrix: np.ndarray,
     c: float = 0.20,
     n_quad: int = 61,
+    c_strategy: str = "fixed",
 ) -> List[ItemParameter]:
     """
     Calibra parâmetros a, b de cada item via MML com quadratura gaussiana.
 
     Args:
         resp_matrix: ndarray (N_alunos × N_itens), valores 0/1
-        c: Parâmetro de acerto casual fixo (0.20 para 5 alternativas)
+        c: Parâmetro de acerto casual (scalar; usado integralmente quando
+            ``c_strategy='fixed'`` e como valor inicial quando ``'bayes'``).
+            Padrão 0.20 = 1/5 para itens ENEM com 5 alternativas.
         n_quad: Número de pontos de quadratura (padrão 61 em [-5, 5])
+        c_strategy: ``'fixed'`` (padrão) mantém ``c`` constante em todos os
+            itens. ``'bayes'`` estima ``c`` por item com prior Beta(10, 40)
+            quando o cohort tem alunos suficientes (>= 1000 informativos);
+            abaixo disso cai para o fixo graciosamente. Expectativa do audit
+            April-2026: 5-10 pontos de MAE contra INEP quando habilitado.
 
     Returns:
         Lista de dicts {a, b, c, taxa_acerto, saturado}
     """
-    return calibrar_itens_mml_em(resp_matrix, c=c, n_quad=n_quad)
+    return calibrar_itens_mml_em(
+        resp_matrix, c=c, n_quad=n_quad, c_strategy=c_strategy,
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════════

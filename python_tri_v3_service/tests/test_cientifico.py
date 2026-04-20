@@ -755,6 +755,72 @@ class TestSaturatedItemsSkipped:
         for r in resultado["resultados_alunos"]:
             assert 0.0 <= r["acert_dif"] <= 1.0
 
+    @pytest.mark.unit
+    def test_bayes_c_strategy_signature_is_available(self):
+        """The MML/EM engine must accept a ``c_strategy`` kwarg.
+
+        Guards against silent removal of the Bayesian c-estimation path. The
+        default must remain ``"fixed"`` to preserve all existing behaviour.
+        """
+        import inspect
+        sig = inspect.signature(calibrar_itens_mml_em)
+        assert "c_strategy" in sig.parameters
+        assert sig.parameters["c_strategy"].default == "fixed"
+
+    @pytest.mark.integration
+    def test_bayes_c_varies_per_item_on_large_sample(self):
+        """With c_strategy='bayes' and N >= 1000, c should vary per item.
+
+        The Beta(α=10, β=40) prior has mean 0.20 and std ~0.055, so estimated
+        c values should stay near 0.20 but diverge from the fixed scalar.
+        """
+        rng = np.random.default_rng(51)
+        n_students = 1500
+        n_itens = 45
+        # Heterogeneous true c per item to give the Bayes path something to
+        # recover. The prior still pulls toward 0.20, so the recovered c
+        # won't match exactly — we just need it to vary item-to-item.
+        true_c = rng.uniform(0.15, 0.30, n_itens)
+        true_a = np.full(n_itens, 1.2)
+        true_b = rng.uniform(-2.0, 2.0, n_itens)
+        true_thetas = rng.normal(0, 1, n_students)
+        probs = true_c[None, :] + (1 - true_c[None, :]) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c_strategy="bayes")
+        c_values = np.array([p["c"] for p in params])
+        # Should vary meaningfully across items
+        assert c_values.std() > 0.01, (
+            f"c values did not diverge under bayes strategy: std={c_values.std():.4f}"
+        )
+        # All values should stay near the prior mean (0.20 +/- 3σ of prior)
+        assert c_values.min() > 0.05
+        assert c_values.max() < 0.40
+
+    @pytest.mark.integration
+    def test_bayes_c_falls_back_to_fixed_for_small_sample(self):
+        """With c_strategy='bayes' but N < the bayes-threshold, the code
+        must fall back to the fixed-c path — with too few students the Beta
+        prior dominates anyway and per-item estimation just adds noise."""
+        rng = np.random.default_rng(52)
+        n_students = 200  # well below the 1000 threshold
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = rng.uniform(-2.0, 2.0, n_itens)
+        probs = 0.20 + 0.80 / (
+            1 + np.exp(-1.0 * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c_strategy="bayes", c=0.22)
+        c_values = np.array([p["c"] for p in params])
+        # Should all be 0.22 exactly (the fixed scalar)
+        assert np.allclose(c_values, 0.22), (
+            f"Fallback did not stay at fixed c: {c_values[:3]}"
+        )
+
     @pytest.mark.integration
     def test_pipeline_logs_saturated_count_in_diagnostico(self, tabela):
         """The diagnostico dict must surface itens_saturados so the user /

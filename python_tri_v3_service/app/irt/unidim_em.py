@@ -123,7 +123,7 @@ def _neg_expected_log_lik_item(
     c: float,
     theta_grid: np.ndarray,
 ) -> float:
-    """Parte do M-step para um item."""
+    """Parte do M-step para um item (c fixo)."""
 
     a, b = params
     if a <= 0.01:
@@ -133,6 +133,42 @@ def _neg_expected_log_lik_item(
     prob = np.clip(prob, 1e-9, 1 - 1e-9)
     ll = expected_correct @ np.log(prob) + (expected_total - expected_correct) @ np.log(1 - prob)
     return -float(ll)
+
+
+# Beta(α=10, β=40) prior on c: mean=0.20, mode≈0.19, std≈0.055. Matches the
+# design choice "5-alternative MCQ" with modest shrinkage toward 0.20. The
+# values are hand-tuned so the penalty becomes negligible for N >= 1000 but
+# strong enough to keep c stable on smaller cohorts.
+_C_PRIOR_ALPHA = 10.0
+_C_PRIOR_BETA = 40.0
+# Below this informative-row count, the Bayes path falls back to fixed c.
+# Rationale: with too few students, the prior dominates and per-item
+# estimation mostly adds noise. 1000 informative rows gives ~25 students
+# per item on a 45-item test — enough signal to justify the extra dof.
+_BAYES_C_MIN_N = 1000
+
+
+def _neg_penalized_log_lik_item_bayes_c(
+    params: np.ndarray,
+    expected_correct: np.ndarray,
+    expected_total: np.ndarray,
+    theta_grid: np.ndarray,
+) -> float:
+    """M-step for one item with Beta(α, β) prior on c (per-item estimation).
+
+    Penalized log-likelihood: ll(data | a, b, c) + log Beta(c; α, β).
+    The Beta normalizing constant is independent of c so we drop it. Bounds
+    are enforced by L-BFGS-B; the internal guards here just prevent NaN at
+    the boundary.
+    """
+    a, b, c = params
+    if a <= 0.01 or c <= 0.001 or c >= 0.999:
+        return 1e10
+    prob = P(theta_grid, a, b, c)
+    prob = np.clip(prob, 1e-9, 1 - 1e-9)
+    ll = expected_correct @ np.log(prob) + (expected_total - expected_correct) @ np.log(1 - prob)
+    log_prior = (_C_PRIOR_ALPHA - 1.0) * np.log(c) + (_C_PRIOR_BETA - 1.0) * np.log(1.0 - c)
+    return -float(ll + log_prior)
 
 
 def _informative_rows_mask(resp_matrix: np.ndarray) -> np.ndarray:
@@ -159,6 +195,7 @@ def calibrar_itens_mml_em(
     max_iter: int = 50,
     tol: float = 1e-4,
     chunk_size: int = 4096,
+    c_strategy: str = "fixed",
 ) -> list[ItemParameter]:
     """
     Calibra itens conjuntamente via MML/EM.
@@ -168,6 +205,15 @@ def calibrar_itens_mml_em(
     Alunos com resposta constante (tudo-0 ou tudo-N) são excluídos da
     calibração — cf. :func:`_informative_rows_mask` — mas ainda aparecem no
     ``taxa_acerto`` reportado por item, pois esse campo é diagnóstico.
+
+    Args:
+        c_strategy: ``"fixed"`` (default) keeps ``c`` constant across items
+            at the scalar value passed via ``c``. ``"bayes"`` estimates
+            ``c`` per item under a Beta(10, 40) prior (mean 0.20, std ~0.055)
+            whenever the informative-row count is at least ``_BAYES_C_MIN_N``
+            — below that threshold the Bayes path gracefully falls back to
+            fixed ``c``. Expected MAE improvement: 5-10 points on cohorts
+            where true item guessing rates vary (per the Apr-2026 audit).
     """
 
     if resp_matrix.ndim != 2 or resp_matrix.size == 0:
@@ -195,6 +241,22 @@ def calibrar_itens_mml_em(
     params = _init_item_params(resp_for_em, c)
     prev_loglik: Optional[float] = None
 
+    # Decide the c strategy once, before the EM loop. Bayesian per-item c is
+    # only safe when there are enough informative students (_BAYES_C_MIN_N);
+    # below that the Beta prior dominates anyway and the extra degree of
+    # freedom just introduces noise.
+    use_bayes_c = (
+        c_strategy == "bayes" and resp_for_em.shape[0] >= _BAYES_C_MIN_N
+    )
+    if c_strategy == "bayes" and not use_bayes_c:
+        logger.info(
+            "calibrar_itens_mml_em: c_strategy='bayes' requested but only "
+            "%d informative rows (< %d); falling back to fixed c=%s.",
+            resp_for_em.shape[0],
+            _BAYES_C_MIN_N,
+            c,
+        )
+
     for _ in range(max_iter):
         n_k, r_jk, loglik = _expected_counts(
             resp_for_em,
@@ -207,15 +269,27 @@ def calibrar_itens_mml_em(
         new_params: list[ItemParameter] = []
         max_delta = 0.0
         for j, current in enumerate(params):
-            res = minimize(
-                _neg_expected_log_lik_item,
-                x0=[current["a"], current["b"]],
-                args=(r_jk[j], n_k, c, theta_grid),
-                method="L-BFGS-B",
-                bounds=[(0.3, 4.0), (-5.0, 5.0)],
-                options={"maxiter": 200, "ftol": 1e-9},
-            )
-            a_est, b_est = res.x
+            if use_bayes_c:
+                res = minimize(
+                    _neg_penalized_log_lik_item_bayes_c,
+                    x0=[current["a"], current["b"], current["c"]],
+                    args=(r_jk[j], n_k, theta_grid),
+                    method="L-BFGS-B",
+                    bounds=[(0.3, 4.0), (-5.0, 5.0), (0.05, 0.40)],
+                    options={"maxiter": 200, "ftol": 1e-9},
+                )
+                a_est, b_est, c_est = res.x
+            else:
+                res = minimize(
+                    _neg_expected_log_lik_item,
+                    x0=[current["a"], current["b"]],
+                    args=(r_jk[j], n_k, c, theta_grid),
+                    method="L-BFGS-B",
+                    bounds=[(0.3, 4.0), (-5.0, 5.0)],
+                    options={"maxiter": 200, "ftol": 1e-9},
+                )
+                a_est, b_est = res.x
+                c_est = c
             max_delta = max(
                 max_delta,
                 abs(float(a_est) - current["a"]),
@@ -225,7 +299,7 @@ def calibrar_itens_mml_em(
                 {
                     "a": round(float(a_est), 4),
                     "b": round(float(b_est), 4),
-                    "c": c,
+                    "c": round(float(c_est), 4),
                     "taxa_acerto": round(float(resp_matrix[:, j].mean()), 4),
                     # Saturation threshold tied to the L-BFGS-B bound (5.0).
                     # Reaching within 0.2 of the bound means the optimizer likely

@@ -51,15 +51,20 @@ def calibrar_itens_fast(
     resp_matrix: np.ndarray,
     c: float = 0.20,
     n_quad: int = 61,
+    c_strategy: str = "fixed",
 ) -> list[dict[str, Any]]:
     """
     Wrapper do estimador conjunto usado no motor principal.
 
     O nome `fast` foi mantido para preservar o contrato do módulo de microdados,
     mas a implementação agora delega para a calibração conjunta em chunks.
+    ``c_strategy='bayes'`` habilita estimação per-item de ``c`` com prior
+    Beta(10, 40) quando o cohort tem >= 1000 alunos informativos.
     """
 
-    return calibrar_itens_mml_em(resp_matrix, c=c, n_quad=n_quad)
+    return calibrar_itens_mml_em(
+        resp_matrix, c=c, n_quad=n_quad, c_strategy=c_strategy,
+    )
 
 
 def eap_theta_batch(
