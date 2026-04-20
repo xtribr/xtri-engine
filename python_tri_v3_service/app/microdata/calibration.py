@@ -50,7 +50,7 @@ MIN_ITEMS_PER_STUDENT = 30
 def calibrar_itens_fast(
     resp_matrix: np.ndarray,
     c: float = 0.20,
-    n_quad: int = 41,
+    n_quad: int = 61,
 ) -> list[dict[str, Any]]:
     """
     Wrapper do estimador conjunto usado no motor principal.
@@ -65,7 +65,7 @@ def calibrar_itens_fast(
 def eap_theta_batch(
     resp_matrix: np.ndarray,
     item_params: list[dict[str, float]],
-    n_quad: int = 41,
+    n_quad: int = 61,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Vectorized EAP theta estimation for ALL students at once.
 
@@ -85,12 +85,12 @@ def eap_theta_batch(
     Args:
         resp_matrix: ``(N_students, N_items)`` int array of 0/1 responses.
         item_params: List of N_items dicts with keys ``a``, ``b``, ``c``.
-        n_quad: Quadrature points (default 41, matches ``eap_theta``).
+        n_quad: Quadrature points (default 61, matches ``eap_theta``).
 
     Returns:
         ``(theta, se)`` each shape ``(N_students,)`` as float64 arrays.
     """
-    theta_grid = np.linspace(-4, 4, n_quad)  # (K,)
+    theta_grid = np.linspace(-5, 5, n_quad)  # (K,) covers ±5σ
     prior = norm.pdf(theta_grid, 0, 1)  # (K,)
 
     a_arr = np.array([p["a"] for p in item_params], dtype=float)  # (J,)

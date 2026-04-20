@@ -3,6 +3,11 @@
 import numpy as np
 import pytest
 
+from app.irt.scoring import eap_theta as _eap_theta_raw
+from app.irt.unidim_em import (
+    _theta_grid_and_weights,
+    calibrar_itens_mml_em,
+)
 from app.motores.cientifico import (
     P,
     calibrar_itens,
@@ -90,8 +95,9 @@ class TestCalibrarItens:
     def test_b_dentro_dos_limites(self, respostas_binarias_50x45):
         matrix = np.array(respostas_binarias_50x45, dtype=int)
         params = calibrar_itens(matrix, c=0.20)
+        # Optimizer bounds widened to ±5 along with the [-5, 5] quadrature grid.
         for p in params:
-            assert -4.0 <= p["b"] <= 4.0
+            assert -5.0 <= p["b"] <= 5.0
 
     @pytest.mark.integration
     def test_c_fixo(self, respostas_binarias_50x45):
@@ -402,3 +408,105 @@ class TestEstimarThetaIndividual:
         )
         for resultado in (resultado_padrao_1, resultado_padrao_2):
             assert ref["tri_min"] - margem <= resultado["nota_ancorada"] <= ref["tri_max"] + margem
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quadrature + EM convergence (accuracy plan #1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestQuadratureGrid:
+    """Guards against silent narrowing of the quadrature grid.
+
+    The grid has to span the student theta distribution — narrowing it
+    (e.g. back to [-4, 4]) loses tail mass for high-ability students,
+    which re-introduces 2-3 MAE points per the April 2026 accuracy audit.
+    """
+
+    @pytest.mark.unit
+    def test_default_grid_covers_plus_minus_5_sigma(self):
+        theta_grid, weights = _theta_grid_and_weights(n_quad=61)
+        assert theta_grid[0] <= -5.0 + 1e-9
+        assert theta_grid[-1] >= 5.0 - 1e-9
+        # Weights should sum to 1 (normalised prior on the grid).
+        assert abs(float(weights.sum()) - 1.0) < 1e-12
+
+    @pytest.mark.unit
+    def test_default_grid_has_61_points(self):
+        theta_grid, _ = _theta_grid_and_weights(n_quad=61)
+        assert theta_grid.shape == (61,)
+
+    @pytest.mark.unit
+    def test_calibrar_mml_em_default_n_quad_is_61(self):
+        """Signature defaults protect against silent narrowing."""
+        import inspect
+        sig = inspect.signature(calibrar_itens_mml_em)
+        assert sig.parameters["n_quad"].default == 61
+        assert sig.parameters["max_iter"].default >= 50
+        assert sig.parameters["tol"].default <= 1e-4
+
+    @pytest.mark.unit
+    def test_eap_theta_default_n_quad_is_61(self):
+        import inspect
+        sig = inspect.signature(_eap_theta_raw)
+        assert sig.parameters["n_quad"].default == 61
+
+
+class TestEAPTailSensitivity:
+    """Verifies that high-ability students aren't clipped at the grid edge."""
+
+    @pytest.mark.unit
+    def test_all_correct_student_gets_high_theta(self):
+        """All-correct vectors should land well into the positive tail.
+
+        The new [-5, 5, 61] grid prevents clipping at 3.85 (the old [-4, 4, 41]
+        edge). With c=0.20 the 3PL likelihood plateaus as theta grows, so EAP
+        + N(0,1) prior typically centres around 2.8-3.5 for 45-item vectors —
+        but we also check it's NOT stuck at the old clip point.
+        """
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": float(b), "c": 0.20, "taxa_acerto": 0.5, "saturado": False}
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        theta, se = _eap_theta_raw(np.ones(n_itens, dtype=int), item_params)
+        # Positive tail: at least 2σ above the prior mean
+        assert theta > 2.0, f"All-correct theta too low: {theta}"
+        # Not clipped at the old edge (3.85 was the old EAP ceiling)
+        assert theta < 4.5, f"Theta suspiciously close to grid edge: {theta}"
+        assert se > 0
+
+    @pytest.mark.unit
+    def test_all_wrong_student_gets_low_theta(self):
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": float(b), "c": 0.20, "taxa_acerto": 0.5, "saturado": False}
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        theta, _ = _eap_theta_raw(np.zeros(n_itens, dtype=int), item_params)
+        assert theta < -1.5
+
+
+class TestEMConvergence:
+    """Higher max_iter + tighter tol should not destabilise recovery."""
+
+    @pytest.mark.integration
+    def test_recovers_item_difficulty_order(self):
+        """After calibration, the rank of b must correlate with the true b."""
+        rng = np.random.default_rng(17)
+        n_students = 300
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = np.sort(rng.uniform(-2.0, 2.0, n_itens))  # known order
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c=c)
+        b_hat = np.array([p["b"] for p in params])
+        # Spearman-ish: rank correlation of b estimate with true b
+        from scipy.stats import spearmanr
+        corr, _ = spearmanr(b_hat, true_b)
+        assert corr > 0.90, f"b rank correlation too low: {corr:.3f}"

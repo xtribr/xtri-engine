@@ -22,16 +22,18 @@ def P(theta: np.ndarray, a: float, b: float, c: float = 0.20) -> np.ndarray:
 def eap_theta(
     responses: np.ndarray,
     item_params: Sequence[ItemParameter],
-    n_quad: int = 41,
+    n_quad: int = 61,
 ) -> tuple[float, float]:
     """
     Estima θ via EAP com prior N(0,1).
 
-    Mantém a implementação atual para preservar compatibilidade enquanto o
-    pipeline de calibração é substituído por uma versão conjunta.
+    Grade ampliada para `[-5, 5]` com 61 pontos (cf. accuracy audit 2026-04)
+    para cobrir alunos de ability extrema sem clipar no limite anterior de
+    ±4σ. Mantém compatibilidade de assinatura: callers podem forçar 41 pontos
+    se precisarem reproduzir um baseline antigo.
     """
 
-    theta_grid = np.linspace(-4, 4, n_quad)
+    theta_grid = np.linspace(-5, 5, n_quad)
     prior = norm.pdf(theta_grid, 0, 1)
 
     lk = np.ones(n_quad)

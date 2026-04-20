@@ -18,9 +18,15 @@ from .scoring import P
 
 
 def _theta_grid_and_weights(n_quad: int) -> tuple[np.ndarray, np.ndarray]:
-    """Retorna a grade de quadratura e os pesos do prior N(0,1)."""
+    """Retorna a grade de quadratura e os pesos do prior N(0,1).
 
-    theta_grid = np.linspace(-4, 4, n_quad)
+    A grade vai de -5 a +5 (cobre ~99.99994% da massa do prior) para evitar
+    clipar alunos de ability extrema. Cf. accuracy audit 2026-04 — a grade
+    anterior em [-4, 4] truncava ~0.006% da cauda, o que se traduzia em
+    ~2-3 pontos de MAE contra o INEP nos alunos acima do percentil 99.
+    """
+
+    theta_grid = np.linspace(-5, 5, n_quad)
     weights = norm.pdf(theta_grid, 0, 1)
     weights /= weights.sum()
     return theta_grid, weights
@@ -129,9 +135,9 @@ def _neg_expected_log_lik_item(
 def calibrar_itens_mml_em(
     resp_matrix: np.ndarray,
     c: float = 0.20,
-    n_quad: int = 41,
-    max_iter: int = 25,
-    tol: float = 1e-3,
+    n_quad: int = 61,
+    max_iter: int = 50,
+    tol: float = 1e-4,
     chunk_size: int = 4096,
 ) -> list[ItemParameter]:
     """
@@ -165,7 +171,7 @@ def calibrar_itens_mml_em(
                 x0=[current["a"], current["b"]],
                 args=(r_jk[j], n_k, c, theta_grid),
                 method="L-BFGS-B",
-                bounds=[(0.3, 4.0), (-4.0, 4.0)],
+                bounds=[(0.3, 4.0), (-5.0, 5.0)],
                 options={"maxiter": 200, "ftol": 1e-9},
             )
             a_est, b_est = res.x
