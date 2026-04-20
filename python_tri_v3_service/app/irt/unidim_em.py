@@ -7,6 +7,7 @@ parâmetros `{a, b, c, taxa_acerto, saturado}` para não quebrar o restante do
 projeto.
 """
 
+import logging
 from typing import Optional, Sequence
 
 import numpy as np
@@ -15,6 +16,8 @@ from scipy.stats import norm
 
 from .contracts import ItemParameter
 from .scoring import P
+
+logger = logging.getLogger(__name__)
 
 
 def _theta_grid_and_weights(n_quad: int) -> tuple[np.ndarray, np.ndarray]:
@@ -173,11 +176,19 @@ def calibrar_itens_mml_em(
     # Calibrate on the informative subset, but keep the full matrix for the
     # per-item taxa_acerto diagnostic (answered by the whole cohort).
     informative_mask = _informative_rows_mask(resp_matrix)
-    if int(informative_mask.sum()) >= 10:
+    n_informative = int(informative_mask.sum())
+    if n_informative >= 10:
         resp_for_em = resp_matrix[informative_mask]
     else:
         # Too few informative rows — fall back to the full matrix. Better to
-        # calibrate with bias than to refuse to calibrate at all.
+        # calibrate with bias than to refuse to calibrate at all, but the
+        # resulting item params are likely to hit the L-BFGS-B bounds.
+        logger.warning(
+            "calibrar_itens_mml_em: only %d informative rows (of %d); "
+            "falling back to full matrix — item params may saturate at bounds.",
+            n_informative,
+            resp_matrix.shape[0],
+        )
         resp_for_em = resp_matrix
 
     theta_grid, weights = _theta_grid_and_weights(n_quad)
