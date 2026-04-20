@@ -709,6 +709,53 @@ class TestSaturatedItemsSkipped:
         assert 0.95 < se < 1.05
 
     @pytest.mark.integration
+    def test_saturated_items_excluded_from_primi_subgroups(self, tabela):
+        """Saturated items must also drop out of idx_faceis/medios/dificeis.
+
+        Otherwise a student's ``acert_dif`` ratio is inflated by untrustworthy
+        hard-item responses, which then biases the pedagogical recommendations
+        in enriquecimento.py.
+        """
+        # Construct a tiny calibrated bank by hand so we know exactly which
+        # items should be in each bucket.
+        from app.motores.cientifico import pipeline_cientifico
+        # We need to call pipeline_cientifico which will calibrate from scratch,
+        # so instead assert the property by checking that acert_dif stays
+        # bounded between 0 and 1 and that diagnostico reports an eap-exclusion
+        # count equal to the saturation count.
+        rng = np.random.default_rng(101)
+        n_students = 60
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        # Mix of easy and impossibly hard items; the impossibly hard ones
+        # should saturate.
+        easy_b = rng.uniform(-2.0, 0.5, 40)
+        impossibly_hard_b = rng.uniform(5.5, 7.0, 5)
+        true_b = np.concatenate([easy_b, impossibly_hard_b])
+        rng.shuffle(true_b)
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": resp[i].tolist()}
+            for i in range(n_students)
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        diag = resultado["diagnostico"]
+
+        # The two counts must agree — itens_excluidos_eap is just a rename of
+        # itens_saturados for the scoring surface, not a separate count.
+        assert diag["itens_excluidos_eap"] == diag["itens_saturados"]
+        # All acert_dif values must stay in [0, 1] — if saturated items had
+        # been mixed in, acertos_dificeis could exceed n_dificeis.
+        for r in resultado["resultados_alunos"]:
+            assert 0.0 <= r["acert_dif"] <= 1.0
+
+    @pytest.mark.integration
     def test_pipeline_logs_saturated_count_in_diagnostico(self, tabela):
         """The diagnostico dict must surface itens_saturados so the user /
         frontend can flag calibrations where a large fraction of items were

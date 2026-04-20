@@ -160,10 +160,15 @@ def _pipeline_cientifico_batch(
     b_vals = [p["b"] for p in item_params]
     n_saturados = sum(1 for b in b_vals if b >= 4.8)
 
-    # 2. Primi difficulty subgroups.
-    idx_faceis = [j for j, p in enumerate(item_params) if p["b"] < -1.5]
-    idx_medios = [j for j, p in enumerate(item_params) if -1.5 <= p["b"] <= 1.5]
-    idx_dificeis = [j for j, p in enumerate(item_params) if p["b"] > 1.5]
+    # 2. Primi difficulty subgroups. Saturated items are excluded — their b
+    # is clamped at the optimizer bound and is not a trustworthy difficulty
+    # signal, which would otherwise inflate the hard-items-correct ratio.
+    idx_faceis = [j for j, p in enumerate(item_params)
+                  if p["b"] < -1.5 and not p.get("saturado")]
+    idx_medios = [j for j, p in enumerate(item_params)
+                  if -1.5 <= p["b"] <= 1.5 and not p.get("saturado")]
+    idx_dificeis = [j for j, p in enumerate(item_params)
+                    if p["b"] > 1.5 and not p.get("saturado")]
     n_dificeis = len(idx_dificeis)
 
     # 3. VECTORIZED theta EAP for all students at once.
@@ -206,6 +211,10 @@ def _pipeline_cientifico_batch(
         "b_medio": round(float(np.mean(b_vals)), 3) if b_vals else 0.0,
         "b_desvio": round(float(np.std(b_vals)), 3) if b_vals else 0.0,
         "itens_saturados": n_saturados,
+        # n_saturados items are zero-weighted in the batch EAP and dropped
+        # from the Primi difficulty buckets. Surfaces the scoring exclusion
+        # to consumers of the diagnostic dict.
+        "itens_excluidos_eap": n_saturados,
         "nota_media": round(float(np.mean(notas)), 1) if notas else 0.0,
         "itens_dificeis": n_dificeis,
     }

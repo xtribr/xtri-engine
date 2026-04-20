@@ -82,9 +82,17 @@ def pipeline_cientifico(
 
     # 2. Classify items by difficulty subgroups (Primi & Cicchetto methodology)
     # Hard items: b > 1.5 | Medium: -1.5 <= b <= 1.5 | Easy: b < -1.5
-    idx_faceis = [j for j, p in enumerate(item_params) if p['b'] < -1.5]
-    idx_medios = [j for j, p in enumerate(item_params) if -1.5 <= p['b'] <= 1.5]
-    idx_dificeis = [j for j, p in enumerate(item_params) if p['b'] > 1.5]
+    # Saturated items are excluded from ALL three buckets — their b estimate
+    # was clamped at the L-BFGS-B bound and is not a trustworthy difficulty
+    # signal. Including them in ``idx_dificeis`` would inflate a student's
+    # hard-items-correct ratio (acert_dif) whenever they happened to respond
+    # 1 on an untrustworthy item, which then biases the pedagogical recs.
+    idx_faceis = [j for j, p in enumerate(item_params)
+                  if p['b'] < -1.5 and not p.get('saturado')]
+    idx_medios = [j for j, p in enumerate(item_params)
+                  if -1.5 <= p['b'] <= 1.5 and not p.get('saturado')]
+    idx_dificeis = [j for j, p in enumerate(item_params)
+                    if p['b'] > 1.5 and not p.get('saturado')]
 
     n_faceis = len(idx_faceis)
     n_medios = len(idx_medios)
@@ -135,6 +143,10 @@ def pipeline_cientifico(
         'b_medio': round(float(np.mean(b_vals)), 3),
         'b_desvio': round(float(np.std(b_vals)), 3),
         'itens_saturados': n_saturados,
+        # n_saturados items are excluded from EAP scoring AND from the Primi
+        # difficulty buckets (b estimate is untrustworthy). Documented here so
+        # consumers of diagnostico understand what the flag implies.
+        'itens_excluidos_eap': n_saturados,
         'nota_media': round(float(np.mean(notas)), 1),
         'nota_min': round(float(np.min(notas)), 1),
         'nota_max': round(float(np.max(notas)), 1),
