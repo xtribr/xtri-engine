@@ -93,6 +93,13 @@ def eap_theta_batch(
     theta_grid = np.linspace(-5, 5, n_quad)  # (K,) covers ±5σ
     prior = norm.pdf(theta_grid, 0, 1)  # (K,)
 
+    # Zero-weight saturated items so they don't bias the batch EAP. Their
+    # ``b`` is clamped at the L-BFGS-B bound (|b| >= 4.8) and carries no
+    # trustworthy signal. Aligned with the scalar ``eap_theta`` skip path.
+    weight_arr = np.array(
+        [0.0 if p.get("saturado") else 1.0 for p in item_params], dtype=float,
+    )
+
     a_arr = np.array([p["a"] for p in item_params], dtype=float)  # (J,)
     b_arr = np.array([p["b"] for p in item_params], dtype=float)  # (J,)
     c_arr = np.array([p["c"] for p in item_params], dtype=float)  # (J,)
@@ -106,8 +113,12 @@ def eap_theta_batch(
     log_p = np.log(prob)  # (K, J)
     log_1p = np.log(1 - prob)  # (K, J)
 
-    resp = resp_matrix.astype(float)  # (N, J)
-    one_minus_resp = 1.0 - resp  # (N, J)
+    raw_resp = resp_matrix.astype(float)  # (N, J), 0/1
+    # Weighted versions: saturated items contribute 0 to both terms of the
+    # likelihood sum, which is mathematically equivalent to multiplying the
+    # per-item likelihood by 1.0 (i.e., dropping it from the product).
+    resp = raw_resp * weight_arr[None, :]
+    one_minus_resp = (1.0 - raw_resp) * weight_arr[None, :]
 
     # log_lk[i, k] = sum_j resp[i, j] * log_p[k, j] + (1 - resp[i, j]) * log_1p[k, j]
     # Matmul form: (N, J) @ (J, K) = (N, K)

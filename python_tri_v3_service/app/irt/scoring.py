@@ -31,6 +31,11 @@ def eap_theta(
     para cobrir alunos de ability extrema sem clipar no limite anterior de
     ±4σ. Mantém compatibilidade de assinatura: callers podem forçar 41 pontos
     se precisarem reproduzir um baseline antigo.
+
+    Items flagged ``saturado=True`` are excluded from the likelihood: their
+    b estimate was clamped at the optimizer bound (|b| >= 4.8) so using it
+    injects a bias roughly equal to the clamp distance. If every item is
+    saturated, the posterior collapses to the prior (θ≈0, SE≈1).
     """
 
     theta_grid = np.linspace(-5, 5, n_quad)
@@ -38,6 +43,8 @@ def eap_theta(
 
     lk = np.ones(n_quad)
     for j, p in enumerate(item_params):
+        if p.get("saturado"):
+            continue  # unreliable b — skip to avoid biasing theta
         prob = P(theta_grid, p["a"], p["b"], p["c"])
         prob = np.clip(prob, 1e-9, 1 - 1e-9)
         lk *= np.where(responses[j] == 1, prob, 1 - prob)

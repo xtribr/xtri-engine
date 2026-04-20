@@ -123,6 +123,46 @@ class TestEAPThetaBatch:
             f"se mismatch: max diff = {np.abs(batch_se - scalar_se).max():.6f}"
         )
 
+    @pytest.mark.unit
+    def test_saturated_item_excluded_in_batch(self):
+        """Accuracy plan #3: saturated items (clamped b) must not contribute
+        to the batch EAP. Must stay consistent with scalar ``eap_theta``."""
+        rng = np.random.default_rng(31)
+        n_students = 20
+        n_items = 15
+        item_params = [
+            {
+                "a": float(rng.uniform(0.8, 2.2)),
+                "b": float(rng.uniform(-2.0, 2.0)),
+                "c": 0.2,
+                "saturado": False,
+            }
+            for _ in range(n_items)
+        ]
+        resp_matrix = rng.integers(0, 2, size=(n_students, n_items)).astype(int)
+
+        # Baseline: no saturated items
+        batch_theta_baseline, _ = eap_theta_batch(resp_matrix, item_params)
+
+        # Flag item 3 as saturated with a clamped b — the batch should
+        # behave as if that item were absent.
+        item_params_flagged = [dict(p) for p in item_params]
+        item_params_flagged[3]["saturado"] = True
+        item_params_flagged[3]["b"] = 4.9
+        batch_theta_flagged, _ = eap_theta_batch(resp_matrix, item_params_flagged)
+
+        # Reference: manual exclusion
+        params_ex = [p for i, p in enumerate(item_params) if i != 3]
+        resp_ex = np.delete(resp_matrix, 3, axis=1)
+        batch_theta_ex, _ = eap_theta_batch(resp_ex, params_ex)
+
+        assert np.allclose(batch_theta_flagged, batch_theta_ex, atol=1e-6), (
+            "batch EAP with saturated flag diverges from manual exclusion"
+        )
+        # And the flagged version should differ from the baseline (otherwise
+        # the flag has no effect).
+        assert not np.allclose(batch_theta_flagged, batch_theta_baseline, atol=1e-3)
+
 
 class TestEffectiveLCGabarito:
     """The 50-char INEP LC gabarito must be sliced to 45 chars per TP_LINGUA."""

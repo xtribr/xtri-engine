@@ -634,3 +634,108 @@ class TestConstantResponseFilter:
             assert by_id[aid]["theta"] < 0, f"{aid} all-zero but theta={by_id[aid]['theta']}"
         for aid in ids_all_one:
             assert by_id[aid]["theta"] > 0, f"{aid} all-correct but theta={by_id[aid]['theta']}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Saturated item handling in EAP (accuracy plan #3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSaturatedItemsSkipped:
+    """Items flagged ``saturado=True`` must NOT contribute to EAP scoring.
+
+    ``saturado`` means the MML/EM optimizer clamped ``b`` at the L-BFGS-B bound
+    (>=4.8 with the current [-5, 5] bound). That means the b estimate is
+    unreliable — feeding it into EAP adds noise without signal, typically
+    biasing high-ability students downward by ~5-8 MAE points per the
+    April-2026 audit.
+    """
+
+    @pytest.mark.unit
+    def test_saturated_item_identity_in_eap(self):
+        """A saturated item should yield the same EAP as if it were not there.
+
+        Build a 45-item vector with one item flagged saturado and the rest
+        normal. Both (a) dropping that item and (b) marking it saturated
+        should produce the same theta — proving the skip logic works.
+        """
+        n_itens = 45
+        item_params_full = [
+            {
+                "a": 1.2,
+                "b": float(b),
+                "c": 0.20,
+                "taxa_acerto": 0.5,
+                "saturado": False,
+            }
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        responses = np.random.default_rng(7).integers(0, 2, n_itens)
+
+        # Baseline: EAP with all 45 items
+        theta_baseline, _ = _eap_theta_raw(responses, item_params_full)
+
+        # Mark item 10 as saturated → EAP should behave as if only 44 items exist
+        item_params_flagged = [dict(p) for p in item_params_full]
+        item_params_flagged[10]["saturado"] = True
+        item_params_flagged[10]["b"] = 4.9  # simulate the clamped value
+        theta_flagged, _ = _eap_theta_raw(responses, item_params_flagged)
+
+        # Reference: EAP excluding item 10 manually
+        params_ex = [p for i, p in enumerate(item_params_full) if i != 10]
+        responses_ex = np.delete(responses, 10)
+        theta_expected, _ = _eap_theta_raw(responses_ex, params_ex)
+
+        assert abs(theta_flagged - theta_expected) < 1e-5, (
+            f"Saturated-flag skip differs from manual exclusion: "
+            f"flagged={theta_flagged} expected={theta_expected}"
+        )
+        # And should differ from the baseline (otherwise flag has no effect)
+        assert abs(theta_flagged - theta_baseline) > 1e-6
+
+    @pytest.mark.unit
+    def test_all_items_saturated_returns_prior_mean(self):
+        """If every item is flagged saturated, EAP has nothing to work with
+        and must return the prior mean θ=0 with SE=1 (unit prior)."""
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": 4.9, "c": 0.20, "taxa_acerto": 0.01, "saturado": True}
+            for _ in range(n_itens)
+        ]
+        responses = np.ones(n_itens, dtype=int)
+        theta, se = _eap_theta_raw(responses, item_params)
+        # With zero effective items, posterior == prior — theta should be ~0
+        assert abs(theta) < 0.01, f"All-saturated theta should be ~0, got {theta}"
+        # SE should be close to the prior SD of 1
+        assert 0.95 < se < 1.05
+
+    @pytest.mark.integration
+    def test_pipeline_logs_saturated_count_in_diagnostico(self, tabela):
+        """The diagnostico dict must surface itens_saturados so the user /
+        frontend can flag calibrations where a large fraction of items were
+        unreliable (often a red flag for a small or non-representative cohort)."""
+        rng = np.random.default_rng(11)
+        # Create 30 low-ability students against items that require high ability.
+        # Many items will be "impossibly hard" and saturate at the 5.0 bound.
+        n_students = 30
+        n_itens = 45
+        true_thetas = rng.normal(-1.5, 0.5, n_students)  # low-ability cohort
+        true_b = np.sort(rng.uniform(2.0, 4.5, n_itens))  # mostly hard items
+        true_a = np.full(n_itens, 1.0)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+        # Guarantee at least some informative rows
+        resp[0] = (np.arange(n_itens) % 2)
+        resp[1] = (np.arange(n_itens) % 3 == 0).astype(int)
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": resp[i].tolist()}
+            for i in range(n_students)
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        diag = resultado["diagnostico"]
+        assert "itens_saturados" in diag
+        assert diag["itens_saturados"] >= 0  # always a valid count
+        assert len(resultado["resultados_alunos"]) == n_students
