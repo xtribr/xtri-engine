@@ -136,7 +136,7 @@ def load_item_bank_and_transformacao(
 # ════════════════════════════════════════════════════════════════════════════════
 
 def eap_theta(responses: np.ndarray, item_params: List[dict], n_quad: int = 61) -> float:
-    theta_grid = np.linspace(-4, 4, n_quad)
+    theta_grid = np.linspace(-5, 5, n_quad)
     prior = norm.pdf(theta_grid, 0, 1)
     lk = np.ones(n_quad)
     for j, p in enumerate(item_params):

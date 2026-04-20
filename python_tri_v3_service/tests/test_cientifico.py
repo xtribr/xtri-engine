@@ -445,6 +445,20 @@ class TestQuadratureGrid:
         assert sig.parameters["tol"].default <= 1e-4
 
     @pytest.mark.unit
+    def test_production_wrapper_defaults_match_em(self):
+        """``calibrar_itens`` (production wrapper used by /api/v3 routes) must
+        delegate with n_quad=61, not the old 41. The April 2026 review caught
+        a regression where this wrapper still had n_quad=41 and silently
+        downgraded every production calibration call back to the narrow grid.
+        """
+        import inspect
+        sig = inspect.signature(calibrar_itens)
+        assert sig.parameters["n_quad"].default == 61, (
+            "calibrar_itens default dropped the grid improvement — the "
+            "production /api/v3 path will use the old [-4, 4, 41] grid."
+        )
+
+    @pytest.mark.unit
     def test_eap_theta_default_n_quad_is_61(self):
         import inspect
         sig = inspect.signature(_eap_theta_raw)

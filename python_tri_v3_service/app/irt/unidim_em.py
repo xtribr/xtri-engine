@@ -186,7 +186,11 @@ def calibrar_itens_mml_em(
                     "b": round(float(b_est), 4),
                     "c": c,
                     "taxa_acerto": round(float(resp_matrix[:, j].mean()), 4),
-                    "saturado": bool(b_est >= 3.9),
+                    # Saturation threshold tied to the L-BFGS-B bound (5.0).
+                    # Reaching within 0.2 of the bound means the optimizer likely
+                    # clamped there, i.e. the item is harder than we can reliably
+                    # estimate with this sample size.
+                    "saturado": bool(b_est >= 4.8),
                 }
             )
 

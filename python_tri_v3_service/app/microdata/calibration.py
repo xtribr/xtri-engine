@@ -147,7 +147,7 @@ def _pipeline_cientifico_batch(
     item_params = calibrar_itens_fast(resp_matrix, c=c_fixo)
 
     b_vals = [p["b"] for p in item_params]
-    n_saturados = sum(1 for b in b_vals if b >= 3.9)
+    n_saturados = sum(1 for b in b_vals if b >= 4.8)
 
     # 2. Primi difficulty subgroups.
     idx_faceis = [j for j, p in enumerate(item_params) if p["b"] < -1.5]

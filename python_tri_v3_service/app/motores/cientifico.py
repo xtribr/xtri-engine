@@ -29,7 +29,7 @@ from ..tabela_referencia import TabelaReferenciaTRI
 def calibrar_itens(
     resp_matrix: np.ndarray,
     c: float = 0.20,
-    n_quad: int = 41
+    n_quad: int = 61,
 ) -> List[ItemParameter]:
     """
     Calibra parâmetros a, b de cada item via MML com quadratura gaussiana.
@@ -37,7 +37,7 @@ def calibrar_itens(
     Args:
         resp_matrix: ndarray (N_alunos × N_itens), valores 0/1
         c: Parâmetro de acerto casual fixo (0.20 para 5 alternativas)
-        n_quad: Número de pontos de quadratura
+        n_quad: Número de pontos de quadratura (padrão 61 em [-5, 5])
 
     Returns:
         Lista de dicts {a, b, c, taxa_acerto, saturado}
@@ -78,7 +78,7 @@ def pipeline_cientifico(
 
     # Estatísticas dos parâmetros
     b_vals = [p['b'] for p in item_params]
-    n_saturados = sum(1 for b in b_vals if b >= 3.9)
+    n_saturados = sum(1 for b in b_vals if b >= 4.8)
 
     # 2. Classify items by difficulty subgroups (Primi & Cicchetto methodology)
     # Hard items: b > 1.5 | Medium: -1.5 <= b <= 1.5 | Easy: b < -1.5
