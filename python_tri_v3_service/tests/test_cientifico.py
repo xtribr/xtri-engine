@@ -524,3 +524,113 @@ class TestEMConvergence:
         from scipy.stats import spearmanr
         corr, _ = spearmanr(b_hat, true_b)
         assert corr > 0.90, f"b rank correlation too low: {corr:.3f}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Constant-response filter (accuracy plan #2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestConstantResponseFilter:
+    """Students with all-0 or all-N response vectors must not poison calibration.
+
+    Per the Apr-2026 accuracy audit, these degenerate rows contribute no
+    discriminating signal to the EM M-step and bias item difficulty estimates
+    toward the prior mean — costing ~2-3 MAE points. The filter excludes them
+    from calibration only; scoring is still applied to every student so they
+    still receive a nota.
+    """
+
+    def _synthetic_baseline(self, *, n_students=200, n_itens=45, seed=23):
+        rng = np.random.default_rng(seed)
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = np.sort(rng.uniform(-2.0, 2.0, n_itens))
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+        # Reject students who happen to be all-0 or all-correct by chance — we
+        # want the baseline to be clean of constant-response noise.
+        keep = (resp.sum(axis=1) > 0) & (resp.sum(axis=1) < n_itens)
+        return resp[keep], true_b
+
+    @pytest.mark.integration
+    def test_calibration_ignores_all_zero_students(self):
+        resp, _ = self._synthetic_baseline()
+        params_clean = calibrar_itens_mml_em(resp, c=0.20)
+
+        # Splice in 10 all-zero students (5% of cohort)
+        resp_poisoned = np.vstack([resp, np.zeros((10, resp.shape[1]), dtype=int)])
+        params_poisoned = calibrar_itens_mml_em(resp_poisoned, c=0.20)
+
+        b_clean = np.array([p["b"] for p in params_clean])
+        b_poisoned = np.array([p["b"] for p in params_poisoned])
+        # After filter, the EM sees the same cohort — b should be near-identical.
+        assert np.max(np.abs(b_clean - b_poisoned)) < 0.05, (
+            f"All-zero students moved b by "
+            f"{np.max(np.abs(b_clean - b_poisoned)):.3f} — filter not working"
+        )
+
+    @pytest.mark.integration
+    def test_calibration_ignores_all_one_students(self):
+        resp, _ = self._synthetic_baseline()
+        params_clean = calibrar_itens_mml_em(resp, c=0.20)
+
+        # Splice in 10 all-correct students
+        resp_poisoned = np.vstack([resp, np.ones((10, resp.shape[1]), dtype=int)])
+        params_poisoned = calibrar_itens_mml_em(resp_poisoned, c=0.20)
+
+        b_clean = np.array([p["b"] for p in params_clean])
+        b_poisoned = np.array([p["b"] for p in params_poisoned])
+        assert np.max(np.abs(b_clean - b_poisoned)) < 0.05, (
+            f"All-correct students moved b by "
+            f"{np.max(np.abs(b_clean - b_poisoned)):.3f} — filter not working"
+        )
+
+    @pytest.mark.integration
+    def test_taxa_acerto_still_reflects_full_cohort(self):
+        """Even though constant-response students are filtered from the EM,
+        their responses should still count toward the reported taxa_acerto
+        (this is a diagnostic, not a calibration parameter)."""
+        resp, _ = self._synthetic_baseline()
+        n_students = resp.shape[0]
+        resp_with_zeros = np.vstack([resp, np.zeros((10, resp.shape[1]), dtype=int)])
+        params = calibrar_itens_mml_em(resp_with_zeros, c=0.20)
+
+        # Taxa for each item should be ≤ the baseline taxa (all-zero students
+        # pulled the mean down on every item).
+        full_taxa = resp_with_zeros.mean(axis=0)
+        for j, p in enumerate(params):
+            assert abs(p["taxa_acerto"] - full_taxa[j]) < 0.01, (
+                f"Item {j} taxa_acerto ({p['taxa_acerto']}) diverged from "
+                f"full-cohort empirical rate ({full_taxa[j]:.4f})"
+            )
+
+    @pytest.mark.integration
+    def test_pipeline_still_scores_constant_students(self, tabela):
+        """Constant-response students must still receive a nota — they're just
+        excluded from calibration. Pipeline output row count == input row count."""
+        resp, _ = self._synthetic_baseline(n_students=50)
+        # 45 normal + 5 all-zero + 5 all-correct = 55 alunos total
+        extra = np.vstack([
+            np.zeros((5, resp.shape[1]), dtype=int),
+            np.ones((5, resp.shape[1]), dtype=int),
+        ])
+        full_resp = np.vstack([resp, extra])
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": full_resp[i].tolist()}
+            for i in range(full_resp.shape[0])
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        assert len(resultado["resultados_alunos"]) == full_resp.shape[0]
+        # All-zero students should land in the negative tail, all-correct in the
+        # positive tail. Just assert sign, not exact values.
+        ids_all_zero = {f"S{i:03d}" for i in range(resp.shape[0], resp.shape[0] + 5)}
+        ids_all_one = {f"S{i:03d}" for i in range(resp.shape[0] + 5, resp.shape[0] + 10)}
+        by_id = {r["aluno_id"]: r for r in resultado["resultados_alunos"]}
+        for aid in ids_all_zero:
+            assert by_id[aid]["theta"] < 0, f"{aid} all-zero but theta={by_id[aid]['theta']}"
+        for aid in ids_all_one:
+            assert by_id[aid]["theta"] > 0, f"{aid} all-correct but theta={by_id[aid]['theta']}"

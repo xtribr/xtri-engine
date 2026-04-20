@@ -132,6 +132,23 @@ def _neg_expected_log_lik_item(
     return -float(ll)
 
 
+def _informative_rows_mask(resp_matrix: np.ndarray) -> np.ndarray:
+    """Boolean mask of rows that have at least one 1 AND at least one 0.
+
+    Rows with all-zeros or all-ones (row_sum == 0 or row_sum == n_items) carry
+    no within-student discriminating signal: their posterior theta collapses
+    to the quadrature edge regardless of item parameters, and including them
+    in the M-step biases item difficulties (b) toward the prior mean.
+    Filtering them out of calibration — but NOT out of scoring — addresses
+    the ~2-3 MAE-point poisoning flagged in the Apr-2026 accuracy audit.
+    """
+    if resp_matrix.ndim != 2 or resp_matrix.size == 0:
+        return np.zeros((0,), dtype=bool)
+    n_items = resp_matrix.shape[1]
+    row_sums = resp_matrix.sum(axis=1)
+    return (row_sums > 0) & (row_sums < n_items)
+
+
 def calibrar_itens_mml_em(
     resp_matrix: np.ndarray,
     c: float = 0.20,
@@ -145,18 +162,31 @@ def calibrar_itens_mml_em(
 
     O E-step usa chunks de alunos para reduzir consumo de memória em grupos
     grandes. O M-step otimiza cada item com as contagens esperadas da grade.
+    Alunos com resposta constante (tudo-0 ou tudo-N) são excluídos da
+    calibração — cf. :func:`_informative_rows_mask` — mas ainda aparecem no
+    ``taxa_acerto`` reportado por item, pois esse campo é diagnóstico.
     """
 
     if resp_matrix.ndim != 2 or resp_matrix.size == 0:
         return []
 
+    # Calibrate on the informative subset, but keep the full matrix for the
+    # per-item taxa_acerto diagnostic (answered by the whole cohort).
+    informative_mask = _informative_rows_mask(resp_matrix)
+    if int(informative_mask.sum()) >= 10:
+        resp_for_em = resp_matrix[informative_mask]
+    else:
+        # Too few informative rows — fall back to the full matrix. Better to
+        # calibrate with bias than to refuse to calibrate at all.
+        resp_for_em = resp_matrix
+
     theta_grid, weights = _theta_grid_and_weights(n_quad)
-    params = _init_item_params(resp_matrix, c)
+    params = _init_item_params(resp_for_em, c)
     prev_loglik: Optional[float] = None
 
     for _ in range(max_iter):
         n_k, r_jk, loglik = _expected_counts(
-            resp_matrix,
+            resp_for_em,
             params,
             theta_grid,
             weights,
