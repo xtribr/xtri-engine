@@ -109,20 +109,26 @@ class TestSyntheticAccuracy:
         mae = float(np.mean(np.abs(v3_notas - ideal_notas)))
         rmse = float(np.sqrt(np.mean((v3_notas - ideal_notas) ** 2)))
 
-        # Floors were calibrated against the post-#1/#2/#3 behaviour and left
-        # with ~20% headroom so CI isn't flaky on the random seed.
-        assert r > 0.90, f"MT correlation regressed: r={r:.4f} < 0.90"
-        assert mae < 45.0, f"MT MAE regressed: {mae:.1f} >= 45.0"
-        assert rmse < 60.0, f"MT RMSE regressed: {rmse:.1f} >= 60.0"
+        # Floors tightened after the review pointed out that r>0.90/MAE<45
+        # gave ~2x headroom. With post-#1/#2/#3 actuals of r≈0.98/MAE≈20,
+        # these tighter floors still have ~30-40% margin over observed noise.
+        assert r > 0.95, f"MT correlation regressed: r={r:.4f} < 0.95"
+        assert mae < 30.0, f"MT MAE regressed: {mae:.1f} >= 30.0"
+        assert rmse < 45.0, f"MT RMSE regressed: {rmse:.1f} >= 45.0"
+
+    # Hard-coded per-area seeds — Python's built-in hash() is randomised per
+    # process (PYTHONHASHSEED), so `hash(area) & 0xFFFF` would give different
+    # seeds on every CI run. Fixed values make the test fully reproducible.
+    _AREA_SEED = {"LC": 1001, "CH": 1002, "CN": 1003, "MT": 1004}
 
     @pytest.mark.integration
     @pytest.mark.parametrize("area", ["LC", "CH", "CN", "MT"])
     def test_all_areas_min_correlation(self, tabela_multiano, area):
         """Each of the 4 ENEM areas must recover θ with r > 0.85 minimum."""
         n_students = 300
-        n_itens = 44 if area == "LC" else 45  # LC goes 0..44
+        n_itens = 44 if area == "LC" else 45  # LC goes 0..44 by ENEM convention
         resp, true_thetas, _, _ = _synthetic_responses(
-            n_students, n_itens, seed=hash(area) & 0xFFFF
+            n_students, n_itens, seed=self._AREA_SEED[area],
         )
 
         alunos = [
