@@ -148,19 +148,23 @@ def _pipeline_cientifico_batch(
     area: str,
     tabela: TabelaReferenciaTRI,
     c_fixo: float = 0.20,
+    c_strategy: str = "fixed",
 ) -> dict[str, Any]:
     """Batched replacement for :func:`app.motores.cientifico.pipeline_cientifico`.
 
     Same inputs, same output shape. The only difference is that per-student
     EAP theta estimation uses :func:`eap_theta_batch` instead of the original
     Python loop — ~100-1000x speedup for large groups (tens of thousands of
-    students per prova group from the microdata).
+    students per prova group from the microdata). ``c_strategy`` is
+    forwarded to the underlying calibrator so the microdata pipeline can
+    opt into per-item Bayesian c estimation (the audit's highest-MAE-impact
+    recommendation — see :mod:`app.irt.unidim_em`).
     """
     resp_matrix = np.array([a["respostas"] for a in alunos], dtype=int)
     n_alunos, n_itens = resp_matrix.shape
 
     # 1. Calibrate items via the FAST O(quadrature) likelihood (no per-student loop).
-    item_params = calibrar_itens_fast(resp_matrix, c=c_fixo)
+    item_params = calibrar_itens_fast(resp_matrix, c=c_fixo, c_strategy=c_strategy)
 
     b_vals = [p["b"] for p in item_params]
     n_saturados = sum(1 for b in b_vals if b >= 4.8)
@@ -298,6 +302,7 @@ def calibrate_area_group(
     tabela: TabelaReferenciaTRI,
     *,
     c_fixo: float = 0.20,
+    c_strategy: str = "fixed",
     min_calibration_size: int = MIN_CALIBRATION_SIZE,
 ) -> pd.DataFrame:
     """Run V3 Local calibration on a homogeneous (area, co_prova [, tp_lingua]) group.
@@ -388,7 +393,9 @@ def calibrate_area_group(
     # Run the BATCHED pipeline (~1000x faster than pipeline_cientifico for
     # large groups because the per-student EAP loop is vectorized).
     try:
-        result = _pipeline_cientifico_batch(alunos, area, tabela, c_fixo=c_fixo)
+        result = _pipeline_cientifico_batch(
+            alunos, area, tabela, c_fixo=c_fixo, c_strategy=c_strategy,
+        )
     except Exception as exc:  # noqa: BLE001
         logger.warning("_pipeline_cientifico_batch failed for area=%s: %s", area, exc)
         return pd.DataFrame()
@@ -425,6 +432,7 @@ def calibrate_all_areas(
     tabela: TabelaReferenciaTRI,
     *,
     c_fixo: float = 0.20,
+    c_strategy: str = "fixed",
     min_calibration_size: int = MIN_CALIBRATION_SIZE,
     progress_callback: Optional[callable] = None,
 ) -> pd.DataFrame:
@@ -493,6 +501,7 @@ def calibrate_all_areas(
                 area,
                 tabela,
                 c_fixo=c_fixo,
+                c_strategy=c_strategy,
                 min_calibration_size=min_calibration_size,
             )
             if results.empty:

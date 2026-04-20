@@ -290,11 +290,16 @@ def calibrar_itens_mml_em(
                 )
                 a_est, b_est = res.x
                 c_est = c
+            # c-delta has to join the convergence check whenever the Bayes
+            # path is active — otherwise c can oscillate after a/b have
+            # settled and the EM terminates prematurely.
             max_delta = max(
                 max_delta,
                 abs(float(a_est) - current["a"]),
                 abs(float(b_est) - current["b"]),
             )
+            if use_bayes_c:
+                max_delta = max(max_delta, abs(float(c_est) - current["c"]))
             new_params.append(
                 {
                     "a": round(float(a_est), 4),
