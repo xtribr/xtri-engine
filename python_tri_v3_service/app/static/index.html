@@ -815,8 +815,22 @@ function drawAnchorChart(students){
   let maxStudentAcertos=0;
   students.forEach(s=>{if(s.acertos>maxStudentAcertos)maxStudentAcertos=s.acertos});
   const maxAc=Math.max(ref[ref.length-1].acertos, maxStudentAcertos, 45);
+  // INEP reference tables occasionally spike at acertos values with very small
+  // historical sub-cohorts (e.g. CN 2017 ac=9 has tri_max=733 while neighbours
+  // are ~580). A 3-point rolling median on the envelope removes those visual
+  // artifacts without touching the underlying lookup used for actual anchoring.
+  function med3(a,b,c){const s=[a,b,c].sort((x,y)=>x-y);return s[1]}
+  const refSmooth=ref.map((p,i)=>{
+    const prev=ref[Math.max(0,i-1)], next=ref[Math.min(ref.length-1,i+1)];
+    return {
+      acertos:p.acertos,
+      tri_min:med3(prev.tri_min,p.tri_min,next.tri_min),
+      tri_med:p.tri_med, // median line stays unsmoothed — it's the primary reference
+      tri_max:med3(prev.tri_max,p.tri_max,next.tri_max),
+    };
+  });
   let yMin=Infinity,yMax=-Infinity;
-  ref.forEach(p=>{if(p.tri_min<yMin)yMin=p.tri_min;if(p.tri_max>yMax)yMax=p.tri_max});
+  refSmooth.forEach(p=>{if(p.tri_min<yMin)yMin=p.tri_min;if(p.tri_max>yMax)yMax=p.tri_max});
   students.forEach(s=>{if(s.nota>0&&s.nota<yMin)yMin=s.nota;if(s.nota>yMax)yMax=s.nota});
   yMin=Math.floor(yMin/50)*50;yMax=Math.ceil(yMax/50)*50;
   const txF=v=>pad.left+v/maxAc*pw, tyF=v=>pad.top+ph-(v-yMin)/(yMax-yMin)*ph;
@@ -825,9 +839,10 @@ function drawAnchorChart(students){
   ctx.strokeStyle='#f0f0f0';ctx.lineWidth=0.5;
   for(let y=yMin;y<=yMax;y+=50){ctx.beginPath();ctx.moveTo(pad.left,tyF(y));ctx.lineTo(pad.left+pw,tyF(y));ctx.stroke()}
   for(let x=0;x<=maxAc;x+=5){ctx.beginPath();ctx.moveTo(txF(x),pad.top);ctx.lineTo(txF(x),pad.top+ph);ctx.stroke()}
-  // Band
-  ctx.beginPath();ref.forEach((p,i)=>{const x=txF(p.acertos),y=tyF(p.tri_min);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
-  for(let i=ref.length-1;i>=0;i--)ctx.lineTo(txF(ref[i].acertos),tyF(ref[i].tri_max));
+  // Band — drawn from the smoothed envelope so small-sample INEP spikes
+  // (e.g. CN 2017 ac=9) don't produce visual noise. Underlying data untouched.
+  ctx.beginPath();refSmooth.forEach((p,i)=>{const x=txF(p.acertos),y=tyF(p.tri_min);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y)});
+  for(let i=refSmooth.length-1;i>=0;i--)ctx.lineTo(txF(refSmooth[i].acertos),tyF(refSmooth[i].tri_max));
   ctx.closePath();ctx.fillStyle='rgba(200,215,240,0.35)';ctx.fill();
   // Median line
   ctx.beginPath();ctx.strokeStyle='rgba(100,100,160,0.4)';ctx.lineWidth=1.5;ctx.setLineDash([6,4]);
