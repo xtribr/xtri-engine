@@ -366,11 +366,32 @@ async function handleExportResponse(resp,fallbackFilename){
   const contentType=(resp.headers.get('content-type')||'').toLowerCase();
   if(contentType.includes('application/json')){
     const data=await resp.json();
-    alert('Arquivo salvo em:\n'+data.caminho);
+    // WKWebView inside Toga doesn't render alert() by default, so the user
+    // would see the button go back to idle with no feedback. Use an inline
+    // toast instead — self-dismissing after 6s, always visible.
+    showToast('Arquivo salvo: '+data.nome_arquivo+' ('+Math.round((data.bytes||0)/1024)+' KB)\n'+data.caminho);
     return;
   }
   const blob=await resp.blob();
   downloadBlob(blob,parseDownloadFilename(resp,fallbackFilename));
+}
+
+function showToast(message,kind){
+  let host=$('#xtoast');
+  if(!host){
+    host=document.createElement('div');
+    host.id='xtoast';
+    host.style.cssText='position:fixed;top:20px;right:20px;max-width:420px;z-index:9999;display:flex;flex-direction:column;gap:8px';
+    document.body.appendChild(host);
+  }
+  const t=document.createElement('div');
+  const isErr=(kind==='error')||(/erro/i.test(message||''));
+  const bg=isErr?'#e74c3c':'#27ae60';
+  t.style.cssText='background:'+bg+';color:#fff;padding:10px 14px;border-radius:6px;font-size:.85rem;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,0.25);white-space:pre-wrap;word-break:break-all;cursor:pointer';
+  t.textContent=message;
+  t.onclick=()=>t.remove();
+  host.appendChild(t);
+  setTimeout(()=>{if(t.parentNode)t.remove()},isErr?10000:6000);
 }
 
 if(IS_TOGA_CLIENT){
@@ -433,6 +454,9 @@ $('#btnProcess').addEventListener('click',()=>{
 async function doProcess(cOverride){
   const area=$('#area').value, ano=$('#ano').value;
   const c=cOverride!=null?cOverride:parseFloat($('#sliderC').value);
+  // Re-enable the anchor method selector — may have been disabled by a
+  // prior V4 run, which locks it to the linear INEP transformation.
+  $('#anchorMethod').disabled = false;
   const fd=new FormData();
   fd.append('area',area);fd.append('ano_referencia',ano);fd.append('c_fixo',c);
   if(cOverride!=null&&lastFileBuffer){
@@ -535,12 +559,41 @@ async function doProcessV4(){
       tempo_processamento:data.tempo_processamento,
     };
 
-    resultData=v4Data;currentArea=area;currentAl=al;
-    rawThetas=v4Data.resultados.map(r=>({id:r.aluno_id,theta:r['theta_'+al],acertos:r['acertos_'+al],acert_dif:r['acert_dif_'+al]||0}));
-    refLookup={};v4Data.referencia.forEach(p=>{refLookup[p.acertos]=p});
-    $('#tuningPanel').classList.remove('active');  // no tuning for V4 — it's already exact
-    updateSliderState();
-    renderV4Results(v4Data,data);
+    // Store the INEP empirical transformation so reanchor() can apply
+    // shift/scale adjustments while still using the linear σ·θ + μ mapping.
+    v4Data.v4_transformacao = {
+      sigma: parseFloat(data.transformacao_inep.sigma),
+      mu: parseFloat(data.transformacao_inep.mu),
+    };
+    resultData = v4Data;
+    currentArea = area;
+    currentAl = al;
+    rawThetas = v4Data.resultados.map(r => ({
+      id: r.aluno_id,
+      theta: r['theta_' + al],
+      acertos: r['acertos_' + al],
+      acert_dif: r['acert_dif_' + al] || 0,
+    }));
+    refLookup = {};
+    v4Data.referencia.forEach(p => { refLookup[p.acertos] = p });
+
+    // V4 SHOWS the tuning panel so the user can make subtle adjustments
+    // (Theta Shift / Theta Scale). The anchor-method dropdown is disabled
+    // because the INEP empirical scale is linear — shift/scale is the
+    // only meaningful tuning axis for V4.
+    $('#tuningPanel').classList.add('active');
+    $('#sliderShift').value = 0; $('#valShift').textContent = '0.0';
+    $('#sliderScale').value = 1; $('#valScale').textContent = '1.0';
+    $('#anchorMethod').disabled = true;
+    $('#sliderShift').disabled = false;
+    $('#sliderScale').disabled = false;
+    $('#sliderShift').style.opacity = '1';
+    $('#sliderScale').style.opacity = '1';
+
+    // Render diagnostics + avisos once (they don't change with sliders).
+    renderV4Diagnostics(v4Data, data);
+    // Full render (table + chart + summary) through the shared reanchor path.
+    reanchor({ scroll: true });
   }catch(e){
     $('#errorBox').textContent=e.message;
     $('#errorBox').classList.add('active');
@@ -549,61 +602,20 @@ async function doProcessV4(){
   }
 }
 
-function renderV4Results(v4Data,rawV4){
-  const area=currentArea, al=currentAl;
-  const d=v4Data.diagnosticos[0];
-  const t=rawV4.transformacao_inep;
-  const notas=v4Data.resultados.map(r=>r['nota_'+al]);
-  const avg=(notas.reduce((s,v)=>s+v,0)/notas.length).toFixed(1);
-  const mn=Math.min(...notas).toFixed(1), mx=Math.max(...notas).toFixed(1);
-
-  // Summary
-  $('#summaryBar').innerHTML=
-    `<div class="scard"><div class="v">${v4Data.n_alunos}</div><div class="l">Alunos</div></div>`+
-    `<div class="scard"><div class="v">${area}</div><div class="l">Area</div></div>`+
-    `<div class="scard"><div class="v">${v4Data.ano_referencia}</div><div class="l">Ano ENEM</div></div>`+
-    `<div class="scard" style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);border-color:#4285f4"><div class="v" style="color:#1a73e8">INEP</div><div class="l">Modo V4</div></div>`+
-    `<div class="scard"><div class="v">${avg}</div><div class="l">Nota Media</div></div>`+
-    `<div class="scard"><div class="v">${mn} - ${mx}</div><div class="l">Min - Max</div></div>`;
-
-  // Table
-  const cols=[{key:'aluno_id',label:'ID'},{key:'acertos_'+al,label:'Acertos'},{key:'theta_'+al,label:'Theta'},{key:'nota_'+al,label:'Nota INEP'},{key:'estado_'+al,label:'Nivel',isBadge:true}];
-  $('#thead').innerHTML='<tr>'+cols.map(c=>'<th data-col="'+c.key+'" onclick="doSort(\''+c.key+'\')">'+c.label+'<span class="arr"></span></th>').join('')+'</tr>';
-  renderBody(cols,v4Data.resultados);
-
-  // Draw chart with v4 data — need to build adjusted array format for drawAnchorChart.
-  // acert_dif now comes from the backend (computed from INEP b > 1.5 items) so
-  // dots colour correctly on the hard-item mastery scale.
-  const adjusted=v4Data.resultados.map(r=>({
-    id:r.aluno_id,
-    acertos:r['acertos_'+al],
-    theta:r['theta_'+al],
-    thetaAdj:r['theta_'+al],
-    nota:r['nota_'+al],
-    estado:r['estado_'+al],
-    acert_dif:r['acert_dif_'+al]||0,
-  }));
-  drawAnchorChart(adjusted);
-  $('#chartCard').style.display='block';
-
-  // Diagnostics
+function renderV4Diagnostics(v4Data, rawV4){
+  // V4-specific diagnostics + warnings. The table/chart/summary are produced
+  // by the shared reanchor() path (which now understands v4_transformacao).
+  const d = v4Data.diagnosticos[0];
+  const t = rawV4.transformacao_inep;
   $('#diagGrid').innerHTML=
     `<div class="diag-card"><strong>Modo V4 INEP</strong><br>Parametros oficiais pre-calibrados<br>Prova: ${$('#coProva').value}<br>Itens: ${d.n_itens} | Alunos: ${d.n_alunos}<br>Tempo: ${v4Data.tempo_processamento}s</div>`+
-    `<div class="diag-card"><strong>Transformacao Empirica</strong><br>Nota = ${t.sigma.toFixed(4)} × θ + ${t.mu.toFixed(4)}<br>Calibrada em ${t.n_alunos.toLocaleString()} alunos reais<br>Validada contra microdata (MAE ≈ 0.03)</div>`;
+    `<div class="diag-card"><strong>Transformacao Empirica</strong><br>Nota = ${t.sigma.toFixed(4)} × θ + ${t.mu.toFixed(4)}<br>Calibrada em ${t.n_alunos.toLocaleString()} alunos reais<br>Validada contra microdata (MAE ≈ 0.03)<br><em style="font-size:.75rem;color:#888">Shift/Scale aplicam-se ao θ antes da transformação; método linear é o único suportado em V4.</em></div>`;
 
-  // Reference table
-  renderRefTable(adjusted);
-
-  // Warnings
   if(v4Data.avisos&&v4Data.avisos.length>0){
-    $('#warnCount').textContent=v4Data.avisos.length;
-    $('#warnList').innerHTML=v4Data.avisos.map(w=>'<li>'+w+'</li>').join('');
+    $('#warnCount').textContent = v4Data.avisos.length;
+    $('#warnList').innerHTML = v4Data.avisos.map(w => '<li>'+w+'</li>').join('');
     $('#warningsBox').classList.add('active');
   }
-
-  $('#results').classList.add('active');
-  $('#btnDownload').style.display='inline-block';
-  $('#btnDownloadExcel').style.display='inline-block';
 }
 
 // Cache of loaded provas: key "ano_area" -> list
@@ -675,20 +687,26 @@ function reanchor(options){
   const shift=parseFloat($('#sliderShift').value), scale=parseFloat($('#sliderScale').value);
   const method=$('#anchorMethod').value;
   const al=currentAl;
-  // Ajuste do theta de referência em escala fixa.
-  const adjusted=rawThetas.map(r=>({...r,thetaAdj:(r.theta+shift)*scale}));
-  // Compute notas
-  let dentro=0;
-  adjusted.forEach(r=>{
+  // V4 stores an INEP empirical transformation (sigma, mu) for scoring.
+  // When present, the slider shift/scale still apply to θ, but anchoring
+  // uses the linear nota = sigma·θ_adj + mu instead of the V3 reference
+  // table methods — mathematically the correct thing for INEP's scale.
+  const v4Trans = resultData.v4_transformacao || null;
+  const adjusted = rawThetas.map(r => ({...r, thetaAdj: (r.theta + shift) * scale}));
+  let dentro = 0;
+  adjusted.forEach(r => {
     let nota;
-    if(method==='theta_ref_fixo')nota=anchorThetaRefFixo(r.thetaAdj,r.acertos);
-    else if(method==='cdf_theta')nota=anchorCdfTheta(r.thetaAdj,r.acertos);
-    else if(method==='mediana_acertos')nota=anchorMedianaAcertos(r.thetaAdj,r.acertos);
-    else nota=anchorThetaRefFixo(r.thetaAdj,r.acertos);
-    nota=Math.round(nota*10)/10;
-    r.nota=nota;r.estado=estadoTri(nota);
-    const ref2=getRef(r.acertos);
-    if(ref2&&nota>=ref2.tri_min-0.1&&nota<=ref2.tri_max+0.1)dentro++;
+    if(v4Trans){
+      nota = v4Trans.sigma * r.thetaAdj + v4Trans.mu;
+    } else if(method === 'theta_ref_fixo') nota = anchorThetaRefFixo(r.thetaAdj, r.acertos);
+    else if(method === 'cdf_theta') nota = anchorCdfTheta(r.thetaAdj, r.acertos);
+    else if(method === 'mediana_acertos') nota = anchorMedianaAcertos(r.thetaAdj, r.acertos);
+    else nota = anchorThetaRefFixo(r.thetaAdj, r.acertos);
+    nota = Math.round(nota * 10) / 10;
+    r.nota = nota;
+    r.estado = estadoTri(nota);
+    const ref2 = getRef(r.acertos);
+    if(ref2 && nota >= ref2.tri_min - 0.1 && nota <= ref2.tri_max + 0.1) dentro++;
   });
   // Update resultData
   const idxMap={};adjusted.forEach((r,i)=>{idxMap[r.id]=r});
@@ -702,15 +720,22 @@ function reanchor(options){
   const mn=Math.min(...notas).toFixed(1), mx=Math.max(...notas).toFixed(1);
   const pct=(dentro/adjusted.length*100).toFixed(1);
   const d=resultData.diagnosticos[0];
+  // V4 mode inserts an "INEP" pill in place of the "% Dentro Intervalo" card
+  // because the band is a V3 artifact; for V4 we surface the mode indicator
+  // and the σ·θ + μ transformation instead.
+  const modeCard = v4Trans
+    ? `<div class="scard" style="background:linear-gradient(135deg,#e3f2fd 0%,#bbdefb 100%);border-color:#4285f4"><div class="v" style="color:#1a73e8">INEP</div><div class="l">Modo V4 (σ=${v4Trans.sigma.toFixed(3)})</div></div>`
+    : `<div class="scard"><div class="v">${pct}%</div><div class="l">Dentro Intervalo</div></div>`;
   $('#summaryBar').innerHTML=
     `<div class="scard"><div class="v">${resultData.n_alunos}</div><div class="l">Alunos</div></div>`+
     `<div class="scard"><div class="v">${currentArea}</div><div class="l">Area</div></div>`+
     `<div class="scard"><div class="v">${resultData.ano_referencia}</div><div class="l">Referencia</div></div>`+
     `<div class="scard"><div class="v">${avg}</div><div class="l">Nota Media</div></div>`+
     `<div class="scard"><div class="v">${mn} - ${mx}</div><div class="l">Min - Max</div></div>`+
-    `<div class="scard"><div class="v">${pct}%</div><div class="l">Dentro Intervalo</div></div>`;
-  // Table
-  const cols=[{key:'aluno_id',label:'ID'},{key:'acertos_'+al,label:'Acertos'},{key:'theta_'+al,label:'Theta'},{key:'nota_'+al,label:'Nota TRI'},{key:'acert_dif_'+al,label:'% Dificeis'},{key:'estado_'+al,label:'Nivel',isBadge:true}];
+    modeCard;
+  // Table — label the nota column as "Nota INEP" in V4 mode.
+  const notaLabel = v4Trans ? 'Nota INEP' : 'Nota TRI';
+  const cols=[{key:'aluno_id',label:'ID'},{key:'acertos_'+al,label:'Acertos'},{key:'theta_'+al,label:'Theta'},{key:'nota_'+al,label:notaLabel},{key:'acert_dif_'+al,label:'% Dificeis'},{key:'estado_'+al,label:'Nivel',isBadge:true}];
   $('#thead').innerHTML='<tr>'+cols.map(c=>'<th data-col="'+c.key+'" onclick="doSort(\''+c.key+'\')">'+c.label+'<span class="arr"></span></th>').join('')+'</tr>';
   renderBody(cols,resultData.resultados);
   // Chart
@@ -904,7 +929,14 @@ function drawAnchorChart(students){
   ctx.fillText('Estudo realizado pela XTRI Engine | Prof. Alexandre Emerson Melo de Araujo',pad.left+pw/2,pad.top+ph+60);
 
   // Remove bottom HTML legend (the canvas legend replaces it)
-  $('#chartLegend').innerHTML='';
+  // Legend block under the chart — explains the band, median line, dot color
+  // scale and the pedagogical level bands. Same for V3 and V4; the colorbar
+  // on the chart itself is the acrt_dif gradient which this supplements.
+  $('#chartLegend').innerHTML=
+    '<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:24px;height:12px;background:rgba(200,215,240,0.55);border:1px solid #c0c8dc;display:inline-block"></span> Faixa MIN–MAX da referência (INEP)</span>'
+    +'<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:24px;height:2px;background:rgba(100,100,160,0.6);border-top:2px dashed rgba(100,100,160,0.6);display:inline-block"></span> Mediana de referência por acertos</span>'
+    +'<span style="display:inline-flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:50%;background:linear-gradient(90deg,#ff3300,#ffc300,#2ecc71,#3498db,#9b59b6);display:inline-block"></span> Cor do aluno = acrt_dif (0 → itens difíceis nenhum acertado; 1 → todos)</span>'
+    +'<span style="display:inline-flex;align-items:center;gap:4px;margin-left:auto;font-size:.72rem;color:#888">Níveis: INICIANTE &lt;380 · ELEMENTAR 380–479 · BÁSICO 480–579 · PROFICIENTE 580–649 · AVANÇADO ≥650</span>';
 }
 
 // ── Chart hover tooltip ──
@@ -1024,7 +1056,7 @@ $('#btnDownload').addEventListener('click',async()=>{
     });
     await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.csv');
   }catch(e){
-    alert('Erro ao gerar CSV: '+e.message);
+    showToast('Erro ao gerar CSV: '+e.message);
   }
 });
 
@@ -1061,7 +1093,7 @@ $('#btnDownloadExcel').addEventListener('click',async()=>{
     });
     await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.xlsx');
   }catch(e){
-    alert('Erro ao gerar Excel: '+e.message);
+    showToast('Erro ao gerar Excel: '+e.message);
   }finally{
     btn.textContent=origText;btn.disabled=false;
   }
