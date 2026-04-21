@@ -1609,7 +1609,11 @@ def _score_alunos_with_inep_items(
 
     Each aluno's response vector is aligned to INEP items by position
     (offset_area maps the first file column to a 1-indexed ENEM position).
-    Alunos with fewer than 10 aligned items are skipped.
+    Alunos with fewer than 10 aligned items are skipped. Besides θ and nota,
+    the result includes ``acert_dif`` — the fraction of INEP-classified HARD
+    items (b > 1.5) the student answered correctly. This is the same Primi
+    metric the V3 path exposes, but computed against INEP's ground-truth
+    difficulty estimates instead of the local calibration.
     """
     v4_results: Dict[str, Dict[str, Any]] = {}
     for aluno in alunos_parsed:
@@ -1627,11 +1631,23 @@ def _score_alunos_with_inep_items(
         acertos = int(resp.sum())
         theta, _se = eap_theta_cientifico(resp, aligned_items)
         nota = round(float(sigma * theta + mu), 1)
+
+        # Primi acert_dif: fraction of HARD items (INEP b > 1.5) the student
+        # got right. Matches the thresholds used in motores/cientifico.py so
+        # V3 and V4 dots are coloured on the same scale.
+        hard_idx = [i for i, it in enumerate(aligned_items) if float(it["b"]) > 1.5]
+        if hard_idx:
+            acertos_dificeis = int(resp[hard_idx].sum())
+            acert_dif = round(acertos_dificeis / len(hard_idx), 4)
+        else:
+            acert_dif = 0.0
+
         v4_results[aluno["aluno_id"]] = {
             "theta": round(float(theta), 4),
             "nota": nota,
             "estado": estado_tri(nota),
             "acertos": acertos,
+            "acert_dif": acert_dif,
         }
     return v4_results
 
@@ -1673,6 +1689,7 @@ def _build_validation_comparison(
             theta_v4=v4["theta"],
             nota_v4=nota_v4,
             estado_v4=v4["estado"],
+            acert_dif_v4=float(v4.get("acert_dif", 0.0)),
             diff=round(float(diff), 2),
         ))
 

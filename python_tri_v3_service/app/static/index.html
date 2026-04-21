@@ -512,7 +512,10 @@ async function doProcessV4(){
         ['theta_'+al]:r.theta_v4,
         ['nota_'+al]:r.nota_v4,
         ['estado_'+al]:r.estado_v4,
-        ['acert_dif_'+al]:0,  // not computed in V4
+        // V4 now returns acert_dif computed from INEP's official b values
+        // (items with b > 1.5 = hard). Colour-codes the chart on the same
+        // scale as V3, but with ground-truth item difficulties.
+        ['acert_dif_'+al]:r.acert_dif_v4||0,
       })),
       diagnosticos:[{
         area:area,
@@ -531,7 +534,7 @@ async function doProcessV4(){
     };
 
     resultData=v4Data;currentArea=area;currentAl=al;
-    rawThetas=v4Data.resultados.map(r=>({id:r.aluno_id,theta:r['theta_'+al],acertos:r['acertos_'+al],acert_dif:0}));
+    rawThetas=v4Data.resultados.map(r=>({id:r.aluno_id,theta:r['theta_'+al],acertos:r['acertos_'+al],acert_dif:r['acert_dif_'+al]||0}));
     refLookup={};v4Data.referencia.forEach(p=>{refLookup[p.acertos]=p});
     $('#tuningPanel').classList.remove('active');  // no tuning for V4 — it's already exact
     updateSliderState();

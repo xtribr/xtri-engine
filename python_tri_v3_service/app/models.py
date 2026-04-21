@@ -527,6 +527,11 @@ class ResultadoComparacao(BaseModel):
     theta_v4: float
     nota_v4: float
     estado_v4: str
+    # Primi acert_dif computed from INEP's official item difficulties (b > 1.5).
+    # Lets the frontend color V4 dots by hard-item mastery using ground-truth
+    # difficulties instead of the local V3 calibration. Default 0.0 when the
+    # prova has no items classified as "hard" by INEP.
+    acert_dif_v4: float = 0.0
     # Diferença
     diff: float
 
