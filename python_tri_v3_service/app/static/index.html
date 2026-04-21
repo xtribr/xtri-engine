@@ -455,7 +455,9 @@ async function doProcess(cOverride){
     $('#tuningPanel').classList.add('active');
     if(cOverride==null){$('#sliderShift').value=0;$('#valShift').textContent='0.0';$('#sliderScale').value=1;$('#valScale').textContent='1.0'}
     updateSliderState();
-    reanchor();
+    // Only the initial render after a fresh calibration should scroll.
+    // Subsequent slider/method adjustments call reanchor() without scroll.
+    reanchor({scroll:true});
     if(data.avisos&&data.avisos.length>0){$('#warnCount').textContent=data.avisos.length;$('#warnList').innerHTML=data.avisos.map(w=>'<li>'+w+'</li>').join('');$('#warningsBox').classList.add('active')}
   }catch(e){$('#errorBox').textContent=e.message;$('#errorBox').classList.add('active')}
   finally{$('#status').classList.remove('active');checkReady();$('#cNote').textContent=''}
@@ -569,7 +571,9 @@ function renderV4Results(v4Data,rawV4){
   $('#thead').innerHTML='<tr>'+cols.map(c=>'<th data-col="'+c.key+'" onclick="doSort(\''+c.key+'\')">'+c.label+'<span class="arr"></span></th>').join('')+'</tr>';
   renderBody(cols,v4Data.resultados);
 
-  // Draw chart with v4 data — need to build adjusted array format for drawAnchorChart
+  // Draw chart with v4 data — need to build adjusted array format for drawAnchorChart.
+  // acert_dif now comes from the backend (computed from INEP b > 1.5 items) so
+  // dots colour correctly on the hard-item mastery scale.
   const adjusted=v4Data.resultados.map(r=>({
     id:r.aluno_id,
     acertos:r['acertos_'+al],
@@ -577,7 +581,7 @@ function renderV4Results(v4Data,rawV4){
     thetaAdj:r['theta_'+al],
     nota:r['nota_'+al],
     estado:r['estado_'+al],
-    acert_dif:0,
+    acert_dif:r['acert_dif_'+al]||0,
   }));
   drawAnchorChart(adjusted);
   $('#chartCard').style.display='block';
@@ -663,8 +667,11 @@ function applyAnchorMethodFromLocation(){
 applyAnchorMethodFromLocation();
 
 // ── Re-anchor (client-side) ──
-function reanchor(){
+function reanchor(options){
+  // options.scroll: true only on the first render after processing, so
+  // slider/method changes don't yank the page down on every tick.
   if(!resultData||!rawThetas.length)return;
+  const shouldScroll=!!(options&&options.scroll);
   const shift=parseFloat($('#sliderShift').value), scale=parseFloat($('#sliderScale').value);
   const method=$('#anchorMethod').value;
   const al=currentAl;
@@ -719,7 +726,7 @@ function reanchor(){
   // Reference / Difficulty table (like ENEM 2024 PDF)
   renderRefTable(adjusted);
   $('#results').classList.add('active');$('#btnDownload').style.display='inline-block';$('#btnDownloadExcel').style.display='inline-block';
-  autoScrollToResults();
+  if(shouldScroll)autoScrollToResults();
 }
 
 // ── Slider events ──
