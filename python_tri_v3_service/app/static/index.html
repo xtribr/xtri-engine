@@ -798,7 +798,13 @@ function drawAnchorChart(students){
   // Extra right padding for color bar legend; bottom needs room for tick labels,
   // axis title, AND footer credit (3 stacked text lines below the plot)
   const pad={top:50,right:90,bottom:90,left:65};const pw=W-pad.left-pad.right,ph=H-pad.top-pad.bottom;
-  const maxAc=ref[ref.length-1].acertos;
+  // Every ENEM area has 45 questions, but some per-year reference tables stop at
+  // 44 (e.g. CN 2024) or 43. Without this floor at 45, a student who gets all 45
+  // correct lands to the right of the plot area and disappears. Extend further if
+  // somehow a student reports more acertos than the grid's own ceiling.
+  let maxStudentAcertos=0;
+  students.forEach(s=>{if(s.acertos>maxStudentAcertos)maxStudentAcertos=s.acertos});
+  const maxAc=Math.max(ref[ref.length-1].acertos, maxStudentAcertos, 45);
   let yMin=Infinity,yMax=-Infinity;
   ref.forEach(p=>{if(p.tri_min<yMin)yMin=p.tri_min;if(p.tri_max>yMax)yMax=p.tri_max});
   students.forEach(s=>{if(s.nota>0&&s.nota<yMin)yMin=s.nota;if(s.nota>yMax)yMax=s.nota});
