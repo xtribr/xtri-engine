@@ -1042,7 +1042,10 @@ function renderRefTable(students){
 
 // ── Download ──
 $('#btnDownload').addEventListener('click',async()=>{
-  if(!resultData)return;
+  if(!resultData){
+    showToast('CSV indisponível: processe um simulado antes.','error');
+    return;
+  }
   try{
     const qs=IS_TOGA_CLIENT?'?salvar_localmente=true':'';
     const resp=await fetch('/api/v3/exportar-csv'+qs,{
@@ -1054,25 +1057,57 @@ $('#btnDownload').addEventListener('click',async()=>{
         resultados:resultData.resultados
       })
     });
+    if(!resp.ok){
+      const txt=await resp.text().catch(()=>'');
+      let detail=txt;
+      try{detail=JSON.parse(txt).detail||txt}catch(_){ }
+      throw new Error('HTTP '+resp.status+(detail?': '+detail.slice(0,300):''));
+    }
     await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.csv');
   }catch(e){
-    showToast('Erro ao gerar CSV: '+e.message);
+    console.error('[csv] failed:',e);
+    showToast('Erro ao gerar CSV: '+(e&&e.message?e.message:String(e)),'error');
   }
 });
 
 // ── Download Excel ──
+// Defense-in-depth: every failure mode surfaces a toast so the button never
+// "goes quiet". Reported chronic issue — after the first successful save,
+// subsequent clicks for a different area sometimes produced no file and no
+// error, leaving the user guessing.
 $('#btnDownloadExcel').addEventListener('click',async()=>{
-  if(!resultData)return;
   const btn=$('#btnDownloadExcel');
   const origText=btn.textContent;
+
+  if(!resultData){
+    showToast('Excel indisponível: processe um simulado antes.','error');
+    return;
+  }
+  if(!resultData.resultados||resultData.resultados.length===0){
+    showToast('Excel indisponível: a última calibração não gerou resultados.','error');
+    return;
+  }
+
   btn.textContent='Gerando...';btn.disabled=true;
-
   try{
-    // Capture the current chart as PNG
-    const canvas=$('#anchorChart');
-    const chartPng=canvas.toDataURL('image/png');
+    // Capture the current chart as PNG. If the canvas isn't ready yet
+    // (e.g. clicked before render finished), toDataURL returns a tiny
+    // data: URI — don't abort, just log the anomaly and send an empty
+    // chart so the file still generates.
+    let chartPng='';
+    try{
+      const canvas=$('#anchorChart');
+      if(canvas&&canvas.width>0&&canvas.height>0){
+        chartPng=canvas.toDataURL('image/png');
+      }
+    }catch(canvasErr){
+      console.warn('[excel] canvas capture failed:',canvasErr);
+    }
 
-    const methodLabel=$('#anchorMethod').options[$('#anchorMethod').selectedIndex].text;
+    const methodSel=$('#anchorMethod');
+    const methodLabel=(methodSel&&methodSel.options[methodSel.selectedIndex])
+      ? methodSel.options[methodSel.selectedIndex].text
+      : 'Theta Ref Fixo';
 
     const payload={
       area:currentArea,
@@ -1080,10 +1115,18 @@ $('#btnDownloadExcel').addEventListener('click',async()=>{
       metodo:methodLabel,
       n_alunos:resultData.n_alunos,
       resultados:resultData.resultados,
-      referencia:resultData.referencia,
-      diagnosticos:resultData.diagnosticos,
+      referencia:resultData.referencia||[],
+      diagnosticos:resultData.diagnosticos||[],
       chart_png_base64:chartPng
     };
+    console.log('[excel] dispatching',{
+      area:payload.area,
+      ano:payload.ano_referencia,
+      n_alunos:payload.n_alunos,
+      n_resultados:payload.resultados.length,
+      n_ref:payload.referencia.length,
+      chart_bytes:chartPng.length,
+    });
 
     const qs=IS_TOGA_CLIENT?'?salvar_localmente=true':'';
     const resp=await fetch('/api/v3/exportar-excel'+qs,{
@@ -1091,9 +1134,17 @@ $('#btnDownloadExcel').addEventListener('click',async()=>{
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify(payload)
     });
+    if(!resp.ok){
+      // Pull whatever detail the backend provided — don't swallow it.
+      const txt=await resp.text().catch(()=>'');
+      let detail=txt;
+      try{detail=JSON.parse(txt).detail||txt}catch(_){ }
+      throw new Error('HTTP '+resp.status+(detail?': '+detail.slice(0,300):''));
+    }
     await handleExportResponse(resp,'xtri_'+currentArea+'_'+resultData.ano_referencia+'.xlsx');
   }catch(e){
-    showToast('Erro ao gerar Excel: '+e.message);
+    console.error('[excel] failed:',e);
+    showToast('Erro ao gerar Excel: '+(e&&e.message?e.message:String(e)),'error');
   }finally{
     btn.textContent=origText;btn.disabled=false;
   }
