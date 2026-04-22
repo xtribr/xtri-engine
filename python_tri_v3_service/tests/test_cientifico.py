@@ -239,6 +239,44 @@ class TestAncorarNotas:
         # 0 acertos: interval is collapsed (min == max), so nota == tri_med
         assert abs(resultados[0]["nota_ancorada"] - ref["tri_med"]) < 1.0
 
+    @pytest.mark.unit
+    def test_no_global_cap_below_per_year_tri_max(self):
+        """Regression: the year-specific ``ref_max`` must be respected even
+        when it exceeds ``TRI_MAXIMA_OFICIAL`` (which was derived from MT 2024
+        only). Prior to this fix, MT 2017/2018/2022 students with 41 acertos
+        and high θ were all collapsed to exactly 960.0 because the clip
+        applied ``min(TRI_MAXIMA_OFICIAL, ref_max)`` unconditionally — the
+        per-year max was lost.
+        """
+        multiano = TabelaReferenciaTRI.carregar_multiano()
+        # Every MT year with tri_max > 960 at 41 acertos should produce
+        # distinct notas for a very high-θ student. 2017/2018/2022 all have
+        # tri_max in (980, 990) at that acertos level.
+        thetas = [{"aluno_id": "top", "acertos": 41, "theta": 3.0, "se": 0.3}]
+        seen_notas: list[float] = []
+        for ano in (2017, 2018, 2022):
+            if ano not in multiano:
+                continue
+            resultados = ancorar_notas(thetas, multiano[ano], "MT")
+            nota = resultados[0]["nota_ancorada"]
+            ref_max = multiano[ano].lookup["MT"][41]["tri_max"]
+            # Nota should approach ref_max (θ=3 → norm.cdf(3)=0.9987) and NOT
+            # be stuck at 960.
+            assert nota > 960.0, (
+                f"MT {ano} ac=41 θ=3 nota={nota} stuck at old cap "
+                f"(ref_max for year is {ref_max})"
+            )
+            assert nota <= ref_max + 0.5, (
+                f"MT {ano} ac=41 nota={nota} exceeds year-specific tri_max "
+                f"{ref_max}"
+            )
+            seen_notas.append(nota)
+        # At least 3 distinct notas across the three years — if they all
+        # collapsed to the same value, the global cap is back.
+        assert len(set(round(n, 1) for n in seen_notas)) >= 2, (
+            f"High-θ notas collapsed to a single value across years: {seen_notas}"
+        )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Estado TRI Classification

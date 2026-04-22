@@ -48,14 +48,27 @@ def _clip_nota_na_faixa_referencia(
     ref_max: float,
     tolerancia_pct: float,
 ) -> float:
-    """Aplica clip nos limites da faixa por acertos com pequena tolerância opcional."""
+    """Aplica clip nos limites da faixa por acertos com pequena tolerância opcional.
+
+    ``ref_min`` e ``ref_max`` já vêm da tabela de referência do **ano escolhido**
+    (via ``TabelaReferenciaTRI.obter``), então eles são o teto/piso empírico
+    corretos para aquele ano naquele número de acertos. O clip global
+    ``TRI_MAXIMA_OFICIAL`` era derivado só do MT 2024 (961.9 → 960) e, quando
+    aplicado em cima desses ``ref_max``, estrangulava as notas dos anos em que
+    o teto real é maior — por exemplo MT 2017/2018/2022 com ``tri_max`` de
+    983-988 em 41 acertos eram todos limitados em 960, fazendo alunos com
+    θ alto caírem em uma nota idêntica independente do ano escolhido.
+    Usamos o piso ``TRI_MINIMA_OFICIAL`` para garantir que nenhuma área vá
+    abaixo do mínimo oficial, e um teto absoluto de 1000 como rede de
+    segurança contra pathologias de cálculo — o ``ref_max`` por ano é quem
+    manda dentro desse envelope.
+    """
 
     span = max(ref_max - ref_min, 0.0)
     margem = span * max(tolerancia_pct, 0.0)
     tri_minima = TRI_MINIMA_OFICIAL.get(area, 200.0)
-    tri_maxima = TRI_MAXIMA_OFICIAL.get(area, 1000.0)
     lower = max(tri_minima, ref_min - margem)
-    upper = min(tri_maxima, ref_max + margem)
+    upper = min(1000.0, ref_max + margem)
     return max(lower, min(float(nota), upper))
 
 
