@@ -1535,10 +1535,29 @@ def _load_inep_items_for_prova(
         .execute()
     )
     if not transf_r.data:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Transformação empírica não disponível para {area}/{ano}",
-        )
+        # Surface the list of supported years so the caller (or the UI) knows
+        # what to pick. Calibrating σ, μ requires INEP microdata for that year
+        # which is ~1.6 GB per year and cannot be derived from the reference
+        # table alone — must be populated offline via
+        # app/scripts/calcular_transformacao.py.
+        try:
+            anos_r = (
+                client.table("enem_transformacoes")
+                .select("ano")
+                .eq("area", area)
+                .execute()
+            )
+            anos_ok = sorted({row["ano"] for row in (anos_r.data or [])})
+        except Exception:
+            anos_ok = []
+        detalhe = (
+            f"V4 INEP não disponível para {area}/{ano}. "
+            f"Anos suportados para {area}: {anos_ok or '(nenhum)'}. "
+            "Use modo V3 Local para esse ano, ou rode "
+            "`python -m app.scripts.calcular_transformacao --ano {ano} --area {area}` "
+            "com o MICRODADOS_ENEM_{ano}.csv para habilitar V4."
+        ).format(ano=ano, area=area)
+        raise HTTPException(status_code=404, detail=detalhe)
     transf_row = transf_r.data[0]
 
     itens_area_r = (

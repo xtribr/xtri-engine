@@ -102,7 +102,7 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       </label>
       <label style="font-weight:normal;cursor:pointer;min-width:auto">
         <input type="radio" name="mode" value="v4"> <strong>V4 INEP</strong>
-        <span class="tune-note">usa parametros oficiais do ENEM (precisao cirurgica)</span>
+        <span class="tune-note">usa parametros oficiais do ENEM (precisao cirurgica) <span id="v4YearsHint" style="color:#1a73e8"></span></span>
       </label>
     </div>
 
@@ -243,12 +243,56 @@ const IS_TOGA_CLIENT=APP_QUERY.get('client')==='toga';
 let resultData=null, rawThetas=[], refLookup={}, currentArea='', currentAl='', lastFileBuffer=null;
 
 // ── Years ──
-fetch('/api/v3/anos-referencia').then(r=>r.json()).then(anos=>{
-  const s=$('#ano');s.innerHTML='';
-  anos.forEach(a=>{const o=document.createElement('option');o.value=a;o.textContent=a;s.appendChild(o)});
-  s.value=anos[anos.length-1];checkReady();
+// All V3 reference years (ancoragem via tabela oficial) + the subset that
+// also has V4 (transformação empírica INEP) data in Supabase. When the user
+// switches mode between V3 and V4, the year dropdown is re-populated so it
+// only shows years the selected mode actually supports.
+let ALL_V3_YEARS = [];
+let V4_YEARS = new Set();
+
+function populateAnoDropdown(){
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const allowed = mode === 'v4'
+    ? ALL_V3_YEARS.filter(a => V4_YEARS.has(a))
+    : ALL_V3_YEARS;
+  const s = $('#ano');
+  const prev = s.value;
+  s.innerHTML = '';
+  if(allowed.length === 0){
+    const o = document.createElement('option');
+    o.value=''; o.textContent='(nenhum ano disponível)';
+    s.appendChild(o);
+    return;
+  }
+  allowed.forEach(a => {
+    const o = document.createElement('option');
+    o.value = a;
+    o.textContent = a + (mode === 'v3' && !V4_YEARS.has(a) ? ' (V3 apenas)' : '');
+    s.appendChild(o);
+  });
+  // Keep the user's previous selection if it's still valid, else pick the
+  // latest supported year so the V4 switch doesn't silently reset them.
+  if(allowed.includes(parseInt(prev))) s.value = prev;
+  else s.value = allowed[allowed.length - 1];
+}
+
+Promise.all([
+  fetch('/api/v3/anos-referencia').then(r => r.json()).catch(() => []),
+  fetch('/api/v4/enem/info').then(r => r.ok ? r.json() : {anos_disponiveis: []}).catch(() => ({anos_disponiveis: []})),
+]).then(([anos3, info4]) => {
+  ALL_V3_YEARS = Array.isArray(anos3) ? anos3 : [];
+  V4_YEARS = new Set(info4.anos_disponiveis || []);
+  const v4Years = Array.from(V4_YEARS).sort();
+  const hint = $('#v4YearsHint');
+  if(hint){
+    hint.textContent = v4Years.length
+      ? '· disponível: ' + v4Years.join(', ')
+      : '· sem anos disponíveis';
+  }
+  populateAnoDropdown();
+  checkReady();
   refreshMIRTAvailability();
-}).catch(()=>{$('#ano').innerHTML='<option>Erro</option>'});
+}).catch(() => { $('#ano').innerHTML = '<option>Erro</option>' });
 
 // ── MIRT availability (advanced, opt-in) ──
 // 4s timeout via AbortController so the badges never stay in "carregando..."
@@ -663,7 +707,14 @@ async function updateV4Fields(){
   checkReady();
 }
 
-document.querySelectorAll('input[name="mode"]').forEach(el=>el.addEventListener('change',updateV4Fields));
+document.querySelectorAll('input[name="mode"]').forEach(el=>el.addEventListener('change',()=>{
+  // Switching mode changes which years are valid — re-populate the dropdown
+  // before loading co_prova so the user can never end up with a
+  // "V4 mode + 2017 selected" combination that the backend would reject
+  // with "Transformação empírica não disponível para MT/2017".
+  populateAnoDropdown();
+  updateV4Fields();
+}));
 $('#area').addEventListener('change',updateV4Fields);
 $('#ano').addEventListener('change',()=>{updateV4Fields();refreshMIRTAvailability()});
 
