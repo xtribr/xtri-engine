@@ -17,7 +17,7 @@ header span{font-size:.85rem;opacity:.7}
 .form-row{display:flex;align-items:center;gap:1rem;flex-wrap:wrap;margin-bottom:1rem}
 .form-row label{font-weight:600;font-size:.9rem;min-width:60px}
 .form-row select,.form-row input[type=range]{font-size:.9rem}
-select{padding:.45rem .8rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem}
+select,input[type=text]{padding:.45rem .8rem;border:1px solid #ddd;border-radius:4px;font-size:.9rem}
 .drop-zone{border:2px dashed #ddd;border-radius:6px;padding:2rem;text-align:center;cursor:pointer;transition:all .2s;background:#fafafa;position:relative;margin-bottom:1rem}
 .drop-zone:hover,.drop-zone.dragover{border-color:#3498db;background:#f0f7ff}
 .drop-zone.has-file{border-color:#27ae60;background:#f0fff4}
@@ -104,6 +104,10 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
         <input type="radio" name="mode" value="v4"> <strong>V4 INEP</strong>
         <span class="tune-note">usa parametros oficiais do ENEM (precisao cirurgica) <span id="v4YearsHint" style="color:#1a73e8"></span></span>
       </label>
+      <label style="font-weight:normal;cursor:pointer;min-width:auto">
+        <input type="radio" name="mode" value="v6"> <strong>Escala reduzida/API</strong>
+        <span class="tune-note">10-45 itens com nota ENEM projetada e intervalo de confiança</span>
+      </label>
     </div>
 
     <div class="form-row">
@@ -129,6 +133,11 @@ footer{text-align:center;padding:1.5rem;color:#888;font-size:.8rem}
       <div class="sub">CSV, TXT ou XLSX com respostas binarias (0/1). Uma area por arquivo.</div>
       <div class="fname" id="fname"></div>
       <input type="file" accept=".csv,.txt,.xlsx,.xls" id="fileInput">
+    </div>
+    <div class="form-row">
+      <label for="itensAnulados">Anulados:</label>
+      <input type="text" id="itensAnulados" placeholder="ex.: 141, 142" style="min-width:220px">
+      <span class="tune-note">Itens removidos da calibracao e do denominador.</span>
     </div>
     <div class="form-row">
       <button class="btn btn-primary" id="btnProcess" disabled>Processar</button>
@@ -492,8 +501,79 @@ function anchorPercentilTurma(theta,acertos,rank,total,shift,scale){
 $('#btnProcess').addEventListener('click',()=>{
   const mode = document.querySelector('input[name="mode"]:checked').value;
   if(mode==='v4') doProcessV4();
+  else if(mode==='v6') doProcessReduced();
   else doProcess();
 });
+
+async function doProcessReduced(){
+  const area=$('#area').value, ano=$('#ano').value;
+  const c=parseFloat($('#sliderC').value);
+  const fd=new FormData();
+  fd.append('simulado_id','local-ui-'+Date.now());
+  fd.append('area',area);
+  fd.append('ano_referencia',ano);
+  fd.append('c_fixo',c);
+  fd.append('itens_anulados',$('#itensAnulados').value||'');
+  fd.append('arquivo',input.files[0]);
+
+  $('#statusMsg').textContent='V6 Escala reduzida: projetando '+area+' na escala ENEM...';
+  $('#status').classList.add('active');$('#errorBox').classList.remove('active');
+  $('#warningsBox').classList.remove('active');$('#results').classList.remove('active');
+  $('#tuningPanel').classList.remove('active');
+  $('#chartCard').style.display='none';$('#refTableCard').style.display='none';
+  $('#btnDownload').style.display='none';$('#btnDownloadExcel').style.display='none';$('#btnProcess').disabled=true;
+  try{
+    const resp=await fetch('/api/v6/tri/reduzida/upload',{method:'POST',body:fd});
+    const data=await resp.json();
+    if(!resp.ok)throw new Error(data.detail||'Erro');
+    renderReducedResults(data);
+    if(data.avisos&&data.avisos.length>0){
+      $('#warnCount').textContent=data.avisos.length;
+      $('#warnList').innerHTML=data.avisos.map(w=>'<li>'+w+'</li>').join('');
+      $('#warningsBox').classList.add('active');
+    }
+  }catch(e){$('#errorBox').textContent=e.message;$('#errorBox').classList.add('active')}
+  finally{$('#status').classList.remove('active');checkReady()}
+}
+
+function renderReducedResults(data){
+  resultData=data;currentArea=data.area;currentAl=data.area.toLowerCase();rawThetas=[];
+  const notas=data.resultados.map(r=>r.nota_enem_projetada).filter(n=>n>0);
+  const avg=(notas.reduce((s,v)=>s+v,0)/notas.length).toFixed(1);
+  const mn=Math.min(...notas).toFixed(1), mx=Math.max(...notas).toFixed(1);
+  const precisaoCount={};
+  data.resultados.forEach(r=>{precisaoCount[r.precisao]=(precisaoCount[r.precisao]||0)+1});
+  const precisaoLabel=Object.keys(precisaoCount).sort((a,b)=>precisaoCount[b]-precisaoCount[a])[0]||'—';
+  $('#summaryBar').innerHTML=
+    `<div class="scard"><div class="v">${data.n_alunos}</div><div class="l">Alunos</div></div>`+
+    `<div class="scard"><div class="v">${data.area}</div><div class="l">Area</div></div>`+
+    `<div class="scard"><div class="v">${data.n_itens_validos}/45</div><div class="l">Itens Valid.</div></div>`+
+    `<div class="scard"><div class="v">${avg}</div><div class="l">Nota Projetada Media</div></div>`+
+    `<div class="scard"><div class="v">${mn} - ${mx}</div><div class="l">Min - Max</div></div>`+
+    `<div class="scard"><div class="v">${precisaoLabel}</div><div class="l">Precisao</div></div>`;
+  const cols=[
+    {key:'aluno_id',label:'ID'},
+    {key:'acertos_observados',label:'Acertos'},
+    {key:'acertos_equivalentes_45',label:'Eq. 45'},
+    {key:'theta',label:'Theta'},
+    {key:'nota_enem_projetada',label:'Nota ENEM Proj.'},
+    {key:'intervalo_texto',label:'IC 95%'},
+    {key:'precisao',label:'Precisao'},
+  ];
+  const rows=data.resultados.map(r=>({
+    ...r,
+    acertos_equivalentes_45:Number(r.acertos_equivalentes_45).toFixed(1),
+    theta:Number(r.theta).toFixed(3),
+    intervalo_texto:r.intervalo_95.limite_inferior+' - '+r.intervalo_95.limite_superior,
+  }));
+  $('#thead').innerHTML='<tr>'+cols.map(c=>'<th>'+c.label+'</th>').join('')+'</tr>';
+  renderBody(cols,rows);
+  $('#diagGrid').innerHTML=
+    `<div class="diag-card"><strong>Escala reduzida/API</strong><br>Modo: ${data.modo_scoring}<br>Metodo: ${data.metodo_ancoragem}<br>Itens validos: ${data.n_itens_validos} de ${data.n_itens_referencia}</div>`+
+    `<div class="diag-card"><strong>Uso pedagógico</strong><br>${data.limites_uso}<br><br>Precisao: ${precisaoLabel}</div>`;
+  $('#results').classList.add('active');
+  autoScrollToResults();
+}
 
 async function doProcess(cOverride){
   const area=$('#area').value, ano=$('#ano').value;
@@ -503,6 +583,7 @@ async function doProcess(cOverride){
   $('#anchorMethod').disabled = false;
   const fd=new FormData();
   fd.append('area',area);fd.append('ano_referencia',ano);fd.append('c_fixo',c);
+  fd.append('itens_anulados',$('#itensAnulados').value||'');
   if(cOverride!=null&&lastFileBuffer){
     fd.append('arquivo',new Blob([lastFileBuffer]),lastFileName);
   }else{
@@ -552,6 +633,7 @@ async function doProcessV4(){
     const parseFormData=new FormData();
     parseFormData.append('area',area);
     parseFormData.append('ano_referencia',ano);
+    parseFormData.append('itens_anulados',$('#itensAnulados').value||'');
     parseFormData.append('arquivo',input.files[0]);
     const parseResp=await fetch('/api/v3/processar-csv',{method:'POST',body:parseFormData});
     const parseData=await parseResp.json();

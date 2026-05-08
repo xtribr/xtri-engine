@@ -128,6 +128,74 @@ class ResponseCalibrarCientifico(BaseModel):
 
 
 # ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — V6 ESCALA REDUZIDA
+# ════════════════════════════════════════════════════════════════════════════════
+
+class RequestTRIReduzida(BaseModel):
+    """Payload de entrada para /api/v6/tri/reduzida."""
+    simulado_id: str = Field(..., description="Identificador do simulado reduzido")
+    area: str = Field(..., description="Área: LC, CH, CN ou MT")
+    ano_referencia: int = Field(default=2024, description="Ano da escala ENEM")
+    c_fixo: float = Field(default=0.20, description="Acerto casual fixo")
+    itens_anulados: List[int] = Field(default_factory=list)
+    alunos: List[RespostaAlunoCientifico]
+
+
+class Intervalo95Reduzido(BaseModel):
+    """Intervalo aproximado de 95% para a nota projetada."""
+    limite_inferior: float
+    limite_superior: float
+    se_theta_ajustado: float
+    fator_reducao: float
+
+
+class FaixaReferenciaReduzida(BaseModel):
+    """Faixa oficial interpolada a partir de acertos equivalentes em 45 itens."""
+    acertos_equivalentes_45: float
+    acertos_base_inferior: int
+    acertos_base_superior: int
+    tri_min: float
+    tri_med: float
+    tri_max: float
+
+
+class ResultadoAlunoTRIReduzida(BaseModel):
+    """Resultado por aluno para TRI com escala reduzida."""
+    aluno_id: str
+    nome: Optional[str] = ""
+    acertos_observados: int
+    n_itens_validos: int
+    pct_acerto: float
+    acertos_equivalentes_45: float
+    theta: float
+    se_theta: float
+    nota_enem_projetada: float
+    intervalo_95: Intervalo95Reduzido
+    precisao: str
+    faixa_referencia: FaixaReferenciaReduzida
+    aviso_metodologico: str
+
+
+class ResponseTRIReduzida(BaseModel):
+    """Payload de saída para /api/v6/tri/reduzida."""
+    status: str
+    simulado_id: str
+    area: str
+    ano_referencia: int
+    modo_scoring: str
+    modo_escala: str
+    n_itens_referencia: int
+    n_itens_validos: int
+    n_alunos: int
+    metodo_ancoragem: str
+    limites_uso: str
+    resultados: List[ResultadoAlunoTRIReduzida]
+    parametros_itens: List[ItemParametros]
+    diagnostico: Dict[str, Any] = Field(default_factory=dict)
+    avisos: List[str] = Field(default_factory=list)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
 # MODELOS — ESTIMAÇÃO RÁPIDA COM PARÂMETROS PRÉ-CALIBRADOS
 # ════════════════════════════════════════════════════════════════════════════════
 
