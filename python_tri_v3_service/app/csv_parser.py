@@ -157,6 +157,8 @@ def _parse_csv_text(csv_content: str) -> dict[str, Any]:
             f"Headers: {[h.strip() for h in headers[:10]]}..."
         )
 
+    question_ids = [headers[idx].strip() for idx in question_cols]
+
     # Parse student rows
     alunos: list[dict] = []
     for row_idx, row in enumerate(reader):
@@ -197,6 +199,7 @@ def _parse_csv_text(csv_content: str) -> dict[str, Any]:
         "alunos": alunos,
         "n_alunos": len(alunos),
         "n_itens": n_itens,
+        "question_ids": question_ids,
         "avisos": avisos,
     }
 
@@ -230,6 +233,7 @@ def _parse_xlsx_bytes(raw_bytes: bytes) -> dict[str, Any]:
             f"Headers: {headers[:10]}..."
         )
 
+    question_ids = [headers[idx].strip() for idx in question_cols]
     avisos: list[str] = []
     alunos: list[dict] = []
 
@@ -271,5 +275,6 @@ def _parse_xlsx_bytes(raw_bytes: bytes) -> dict[str, Any]:
         "alunos": alunos,
         "n_alunos": len(alunos),
         "n_itens": len(question_cols),
+        "question_ids": question_ids,
         "avisos": avisos,
     }

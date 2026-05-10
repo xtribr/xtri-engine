@@ -286,6 +286,10 @@ XTRI_VALIDATION = {
     "correlacao_vs_inep_oficial": 1.000000,
     "mae_vs_inep": 0.025,
     "level_accuracy_pct": 99.96,
+    "escopo": (
+        "Benchmark V4 com parâmetros oficiais INEP e transformação sigma/mu "
+        "derivada dos microdados; não é garantia para V3 Local sem itens oficiais."
+    ),
     "fonte_microdata": "https://www.gov.br/inep/pt-br/acesso-a-informacao/dados-abertos/microdados",
 }
 
@@ -451,7 +455,8 @@ def build_metodologia_banner(
                 f"{pct_acerto_medio:.0f}%, acima do P95 nacional). "
                 f"V3 Local ainda depende de calibração local e pode distorcer scores "
                 f"em populações não-representativas. "
-                f"Para precisão absoluta vs INEP, use modo V4 INEP (se as questões forem do banco oficial)."
+                f"Para reconstrução empírica alinhada ao INEP, use modo V4 INEP "
+                f"quando as questões forem do banco oficial e a transformação do ano estiver disponível."
             ),
         })
 
@@ -473,7 +478,10 @@ def build_metodologia_banner(
             "is_strong_cohort": is_strong_cohort,
         },
         "validacao_xtri": {
-            "vs_inep_oficial": "MAE 0.025 pontos contra 360.000 alunos reais (correlação 1.000000)",
+            "vs_inep_oficial": (
+                "Benchmark V4: MAE 0.025 contra 360.000 alunos reais "
+                "(correlação 1.000000) com itens oficiais INEP"
+            ),
             "modo_v4_disponivel": True,
         },
         "avisos": avisos,

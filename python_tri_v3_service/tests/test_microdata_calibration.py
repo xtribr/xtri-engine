@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+import warnings
 
 from app.microdata.calibration import (
     _effective_lc_gabarito,
@@ -162,6 +163,25 @@ class TestEAPThetaBatch:
         # And the flagged version should differ from the baseline (otherwise
         # the flag has no effect).
         assert not np.allclose(batch_theta_flagged, batch_theta_baseline, atol=1e-3)
+
+    @pytest.mark.unit
+    def test_saturated_item_exclusion_does_not_emit_runtime_warning(self):
+        """Zero-weighted saturated items must not trigger 0 × log(P) warnings."""
+        resp_matrix = np.array([[1, 0, 1], [0, 1, 0]], dtype=int)
+        item_params = [
+            {"a": 1.2, "b": -0.5, "c": 0.2, "saturado": False},
+            {"a": 1.5, "b": 4.9, "c": 0.2, "saturado": True},
+            {"a": 0.9, "b": 0.7, "c": 0.2, "saturado": False},
+        ]
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always", RuntimeWarning)
+            theta, se = eap_theta_batch(resp_matrix, item_params)
+
+        runtime_warnings = [w for w in caught if issubclass(w.category, RuntimeWarning)]
+        assert runtime_warnings == []
+        assert np.all(np.isfinite(theta))
+        assert np.all(np.isfinite(se))
 
 
 class TestEffectiveLCGabarito:

@@ -126,8 +126,12 @@ def eap_theta_batch(
     one_minus_resp = (1.0 - raw_resp) * weight_arr[None, :]
 
     # log_lk[i, k] = sum_j resp[i, j] * log_p[k, j] + (1 - resp[i, j]) * log_1p[k, j]
-    # Matmul form: (N, J) @ (J, K) = (N, K)
-    log_lk = resp @ log_p.T + one_minus_resp @ log_1p.T  # (N, K)
+    # Usa einsum em vez de BLAS matmul: em alguns builds NumPy/Accelerate, o
+    # caminho de matmul emite warnings espúrios de divisão/overflow mesmo com
+    # log_p e log_1p finitos. O einsum mantém a mesma matemática sem ruído.
+    log_lk = np.einsum("ij,kj->ik", resp, log_p, optimize=True) + np.einsum(
+        "ij,kj->ik", one_minus_resp, log_1p, optimize=True
+    )
 
     # Numerically stable softmax × prior
     max_log = log_lk.max(axis=1, keepdims=True)  # (N, 1)

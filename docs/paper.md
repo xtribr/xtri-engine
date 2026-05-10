@@ -1,4 +1,4 @@
-# XTRI Engine: An Open-Source Implementation of the 3PL Item Response Theory Scoring Used in the Brazilian ENEM, with Bit-Identical Validation Against 360,000 Real Participants
+# XTRI Engine: A Reproducible 3PL Item Response Theory Scoring Pipeline for the Brazilian ENEM, Empirically Validated Against Official Microdata
 
 **Author**: Alexandre Emerson Melo de Araújo
 **Affiliation**: XTRI Research
@@ -11,11 +11,11 @@
 
 The Brazilian National High School Exam (Exame Nacional do Ensino Médio, ENEM) is a high-stakes assessment administered annually to approximately 4 million candidates, with results determining admission to public universities and access to federal financing. Since 2009, INEP (the administering agency) has scored the multiple-choice sections using a three-parameter logistic (3PL) Item Response Theory model anchored to a reference population. Despite the public release of anonymized item parameters and response microdata, no independent open-source implementation has been empirically validated against the official scores at the individual-student level.
 
-This paper presents **XTRI Engine**, a Python implementation of the 3PL IRT scoring pipeline used by ENEM, including marginal maximum likelihood calibration, expected a posteriori ability estimation, and the empirical derivation of the linear transformation from the standardized ability scale to the reported ENEM scale. We validate the engine against 360,000 real ENEM participants drawn from the official microdata for years 2022, 2023, and 2024, spanning all four knowledge areas (Languages, Humanities, Natural Sciences, Mathematics), using the published pre-calibrated item parameters from ITENS\_PROVA files. For all 12 year × area combinations, the Pearson correlation between XTRI-computed scores and the official `NU_NOTA_*` values is 1.000000 (to six decimal places), with mean absolute error of 0.0252 points on the 0-1000 ENEM scale and 99.96% agreement in pedagogical level classification. The maximum observed absolute error across all 360,000 students is 8.19 points, attributable to a single edge case in the Languages area; the 95th percentile of absolute errors is 0.048 points, confirming that the residual error is dominated by floating-point quadrature rounding rather than methodological divergence.
+This paper presents **XTRI Engine**, a Python implementation of a 3PL IRT scoring pipeline aligned with ENEM's public item-parameter release, including expected a posteriori ability estimation and empirical derivation of the linear transformation from the standardized ability scale to the reported ENEM scale. We validate the engine against 360,000 real ENEM participants drawn from the official microdata for years 2022, 2023, and 2024, spanning all four knowledge areas (Languages, Humanities, Natural Sciences, Mathematics), using the published pre-calibrated item parameters from ITENS\_PROVA files. For all 12 year × area combinations, the Pearson correlation between XTRI-computed scores and the official `NU_NOTA_*` values is 1.000000 (to six decimal places), with mean absolute error of 0.0252 points on the 0-1000 ENEM scale and 99.96% agreement in pedagogical level classification. These results support empirical reproducibility from public data under the stated implementation assumptions; they do not claim access to, or exact equivalence with, INEP's internal production software.
 
 A secondary finding is that the commonly cited textbook transformation `Score = 500 + 100 · θ` is an oversimplification of the actual ENEM scale. Empirical regression of the latent trait against official scores reveals area-specific slopes (σ) ranging from 108.09 (Languages) to 129.65 (Mathematics), and intercepts (μ) from 499.98 to 501.49, stable to four decimal places across the three study years. This dispersion asymmetry reflects variance differences in the 2009 reference population and explains why Mathematics scores can exceed 900 while Language scores rarely surpass 800 at the upper tail.
 
-The complete XTRI Engine source code, validation scripts, and empirical transformation tables are released under an open-source license. Implementation details, reproducibility protocols, and the complete benchmark dataset reference are documented in the accompanying repository.
+The XTRI Engine source code, validation scripts, and empirical transformation tables are documented in the accompanying repository. Implementation details, reproducibility protocols, and benchmark dataset references are included so the results can be rerun when the same public INEP files are available.
 
 **Keywords**: Item Response Theory; Psychometrics; Educational assessment; ENEM; Large-scale testing; Open-source implementation; Empirical validation.
 
@@ -29,7 +29,7 @@ Despite the public release of anonymized microdata — including raw response st
 
 This paper addresses two research questions:
 
-1. **Can an open-source implementation of 3PL IRT reproduce INEP's official scores to arbitrary precision using only the publicly released microdata?**
+1. **Can an independent implementation of 3PL IRT reproduce INEP's official scores to high empirical precision using only the publicly released microdata?**
 
 2. **What is the true linear transformation from the standardized latent ability scale to the reported ENEM scale, and is it truly the `500 + 100 · θ` formula commonly cited in textbook treatments?**
 
@@ -37,7 +37,7 @@ To answer these questions, we developed **XTRI Engine**, a complete Python pipel
 
 We then validated the engine against 360,000 real ENEM participants — 30,000 per combination across 3 years (2022, 2023, 2024) and 4 areas (Languages, Humanities, Natural Sciences, Mathematics), for a total of 12 combinations. The sample is drawn exclusively from "primeira aplicação" (first-administration) candidates who completed all four multiple-choice areas plus the essay.
 
-Our principal finding is that XTRI Engine reproduces INEP's scores to a Pearson correlation of 1.000000 and a mean absolute error of 0.025 points on the 0-1000 scale — a precision indistinguishable from floating-point quadrature rounding. We further demonstrate that the actual transformation from θ to the reported scale uses area-specific parameters (σ, μ), with σ ranging from 108.09 to 129.65 across areas, disproving the textbook simplification.
+Our principal finding is that XTRI Engine reproduces INEP's published scores to a Pearson correlation of 1.000000 and a mean absolute error of 0.025 points on the 0-1000 scale under the documented public-data reconstruction protocol. We further demonstrate that the actual transformation from θ to the reported scale uses area-specific parameters (σ, μ), with σ ranging from 108.09 to 129.65 across areas, contradicting the common textbook simplification.
 
 The remainder of this paper is organized as follows. Section 2 reviews the 3PL model and its application to ENEM. Section 3 describes the XTRI Engine methodology, including the novel empirical derivation of the score transformation. Section 4 presents the validation results. Section 5 discusses implications, limitations, and related work. Section 6 concludes.
 
@@ -103,7 +103,7 @@ For each participant in each area, we constructed a binary response vector of le
 3. For each retained item at position *p*, read the student's answer from `TX_RESPOSTAS_{area}[p − offset]`, where the offset is 1, 46, 91, or 136 for Languages, Humanities, Natural Sciences, or Mathematics respectively (reflecting the exam-wide 1-180 position numbering).
 4. Compare the student's answer to the item's stored `gabarito` in the item bank (not the `TX_GABARITO_{area}` string, which is 50 characters for Languages due to the inclusion of both language variants). Score 1 for a match, 0 otherwise. For items marked as annulled (`gabarito = 'X'` or `.`), credit all participants with 1.
 
-This procedure produces a length-45 binary vector that is then passed to the EAP estimation routine.
+This procedure produces a length-45 binary vector that is then passed to the EAP estimation routine. The mass-validation scripts enforce the first-administration whitelist from `enem_codigos_prova.is_reaplicacao = false`; results should not be reported as first-administration-only unless that table is populated for the target year.
 
 ### 3.4 EAP Ability Estimation
 
@@ -111,9 +111,9 @@ Given the binary response vector **X** = (X_1, ..., X_45) and the pre-calibrated
 
 $$\hat{\theta}_{EAP} = \frac{\int \theta \cdot L(\mathbf{X} \mid \theta) \cdot f(\theta) \, d\theta}{\int L(\mathbf{X} \mid \theta) \cdot f(\theta) \, d\theta}$$
 
-where the likelihood function is the product of 3PL probabilities across the 45 items, and *f*(θ) is the standard normal prior. We implement the integral as a discrete sum over 61 equidistant points on the interval [−4, 4], which we empirically verified to yield stable θ estimates to at least six decimal places compared to higher quadrature orders. To avoid underflow in extreme response patterns, we clip individual item probabilities to the interval [10⁻⁹, 1 − 10⁻⁹] before multiplication. If the integrated likelihood falls below 10⁻³⁰⁰, we return θ = 0 (the prior mean) as a fallback.
+where the likelihood function is the product of 3PL probabilities across the 45 items, and *f*(θ) is the standard normal prior. We implement the integral as a discrete sum over 61 equidistant points on the interval [−5, 5], which covers the operational tails used by the engine and avoids clipping extreme high-ability and low-ability response patterns. To avoid underflow in extreme response patterns, we clip individual item probabilities to the interval [10⁻⁹, 1 − 10⁻⁹] before multiplication. If the integrated likelihood falls below 10⁻³⁰⁰, we return θ = 0 (the prior mean) as a fallback.
 
-The XTRI Engine implementation of `eap_theta` comprises approximately 20 lines of NumPy code and produces results bit-for-bit identical (to NumPy floating-point precision) to the θ estimates produced by INEP when using the same item parameters and response vectors, as demonstrated in Section 4.
+The XTRI Engine implementation of `eap_theta` comprises approximately 20 lines of NumPy code and produces empirically equivalent reported scores against the public `NU_NOTA_*` values when using the same public item parameters and response vectors, as demonstrated in Section 4.
 
 ### 3.5 Empirical Derivation of the Score Transformation
 
@@ -201,7 +201,7 @@ As a secondary experiment, we tested XTRI Engine's alternative mode — local MM
 | Max \|diff\| | 231.5 |
 | Level accuracy | 42.75% |
 
-Although the mean difference is essentially zero (+2.48 on a 0-1000 scale), indicating no systematic bias, the per-student divergence is substantial, with a mean absolute error of 73 points. This represents the irreducible noise floor of local calibration when applied to a 400-student sample: the local MML estimates of item parameters are statistically unstable for small samples, and the anchoring procedure used (intra-group rank within the reference table's Min/Max bounds) cannot fully compensate for the absence of a full national reference distribution. This result empirically quantifies a limitation that has been theoretically understood in the psychometric literature but, to our knowledge, not previously reported at this scale for ENEM-specific simulados.
+Although the mean difference is essentially zero (+2.48 on a 0-1000 scale), indicating no systematic bias, the per-student divergence is substantial, with a mean absolute error of 73 points. This is the observed error floor in the current 400-student experiment, not a theoretical lower bound: the local MML estimates of item parameters are statistically unstable for small samples, and the fixed-theta Min/Med/Max anchoring cannot fully compensate for the absence of a national reference distribution. This result empirically quantifies a limitation that has been theoretically understood in the psychometric literature but, to our knowledge, not previously reported at this scale for ENEM-specific simulados.
 
 ---
 
@@ -209,11 +209,11 @@ Although the mean difference is essentially zero (+2.48 on a 0-1000 scale), indi
 
 ### 5.1 Implications for Score Reporting
 
-The finding that XTRI Engine reproduces INEP's scores to a correlation of 1.000000 with MAE of 0.025 points, when using the official item parameters, establishes that the ENEM scoring pipeline is fully reproducible from publicly available data. This has several immediate implications:
+The finding that XTRI Engine reproduces INEP's published scores to a correlation of 1.000000 with MAE of 0.025 points, when using the official item parameters, establishes that the reported ENEM scale is empirically reproducible from publicly available data under the documented protocol. This has several immediate implications:
 
-1. **Independent audit**: Educational researchers, teachers, and candidates can now audit their own ENEM scores using open-source code. Any discrepancy between a candidate's score and the XTRI Engine computation is, within 0.1 points, evidence of a data processing error (not a methodological difference).
+1. **Independent audit**: Educational researchers, teachers, and candidates can audit ENEM score reconstruction when they have the same public item parameters, response vectors, and transformation table. A discrepancy should be investigated as a data-alignment or implementation issue before making any claim about INEP's internal processing.
 
-2. **School-level feedback**: Schools administering ENEM-compatible simulados can use the XTRI Engine's V4 mode (INEP-official parameters) to produce scores that are bit-identical to what students would receive on the real exam, provided the simulado uses items from the published ENEM item bank.
+2. **School-level feedback**: Schools administering ENEM-compatible simulados can use the XTRI Engine's V4 mode with official INEP item parameters to produce highly aligned score reconstructions when the simulado uses items from the published ENEM item bank and the year-area transformation is available.
 
 3. **Reference for third-party platforms**: Commercial platforms that claim "ENEM-compatible" scoring can now be benchmarked against the open implementation. Any platform differing substantially from XTRI Engine is, de facto, using a different algorithm than INEP's.
 
@@ -254,15 +254,15 @@ Several limitations should be noted:
 
 ## 6. Conclusion
 
-We have presented XTRI Engine, an open-source Python implementation of the three-parameter logistic Item Response Theory scoring pipeline used by Brazil's ENEM exam. By combining a faithful reproduction of the EAP estimation procedure with an empirically derived area-specific linear transformation (disproving the commonly cited `500 + 100 · θ` textbook formula), we achieve bit-identical agreement with INEP's official scores on a benchmark of 360,000 real participants across three years and four knowledge areas. The Pearson correlation is 1.000000 and the mean absolute error is 0.025 points on the 0-1000 ENEM scale — a precision dominated by floating-point quadrature rounding rather than methodological divergence.
+We have presented XTRI Engine, a Python implementation of a three-parameter logistic Item Response Theory scoring pipeline aligned with Brazil's ENEM public data. By combining a faithful EAP estimation procedure with an empirically derived area-specific linear transformation (contradicting the commonly cited `500 + 100 · θ` textbook formula), we achieve near-exact empirical agreement with INEP's published scores on a benchmark of 360,000 real participants across three years and four knowledge areas. The Pearson correlation is 1.000000 and the mean absolute error is 0.025 points on the 0-1000 ENEM scale under the documented reconstruction protocol.
 
 Two contributions of this work are of broad interest:
 
-1. **Reproducibility of high-stakes educational testing**: We demonstrate that an operational IRT scoring pipeline for one of the world's largest standardized tests can be fully reproduced from publicly available data with open-source tools, establishing a precedent for independent verification of testing agencies' claimed methodologies.
+1. **Reproducibility of high-stakes educational testing**: We demonstrate that the published ENEM scores can be reconstructed to high empirical precision from public data with standard psychometric tools, establishing a precedent for independent verification of testing agencies' public scoring artifacts.
 
 2. **Correct characterization of the ENEM scale**: The area-specific σ values (108-130) and the near-stability of the transformation across years provides, to our knowledge, the first empirically derived characterization of the actual ENEM score transformation. This corrects a long-standing simplification in the Brazilian educational literature.
 
-All source code, empirical transformation tables, validation scripts, and reproducibility documentation are released under an open-source license at [github.com/xtribr/xtri-engine](https://github.com/xtribr/xtri-engine). We encourage researchers, educators, and candidates to audit their own ENEM scores, to extend the work to earlier years, and to use the XTRI Engine as a reference point for evaluating third-party scoring platforms.
+Source code, empirical transformation tables, validation scripts, and reproducibility documentation are maintained at [github.com/xtribr/xtri-engine](https://github.com/xtribr/xtri-engine). We encourage researchers, educators, and candidates to rerun the validation with the official INEP files, extend the work to earlier years, and use the XTRI Engine as a reference point for evaluating third-party scoring platforms.
 
 ---
 

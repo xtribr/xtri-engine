@@ -18,5 +18,7 @@ build/
 
 # Local UI/e2e debugging artifacts — not part of the .app bundle.
 .playwright-cli/
+.playwright-mcp/
 .tmp_ui_test/
+exports/
 tmp/

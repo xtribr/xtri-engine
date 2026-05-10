@@ -938,6 +938,33 @@ class TestProcessarCSV:
         )
         assert resp.status_code == 400
 
+    @pytest.mark.api
+    def test_item_anulado_e_removido_do_denominador(self, client: TestClient):
+        headers = ["ID"] + [str(i) for i in range(136, 181)]
+        rows = [",".join(headers)]
+        for i in range(20):
+            respostas = []
+            for q in range(136, 181):
+                if q == 141:
+                    respostas.append("0")
+                else:
+                    respostas.append(str((i + q) % 2))
+            rows.append(",".join([f"S{i:03d}"] + respostas))
+        csv_content = "\n".join(rows)
+        ano = client.get("/api/v3/anos-referencia").json()[-1]
+
+        resp = client.post(
+            "/api/v3/processar-csv",
+            data={"area": "MT", "ano_referencia": str(ano), "itens_anulados": "141"},
+            files={"arquivo": ("mt.csv", csv_content, "text/csv")},
+        )
+
+        assert resp.status_code == 200, resp.text[:300]
+        body = resp.json()
+        assert body["diagnosticos"][0]["n_itens"] == 44
+        assert any("141" in aviso for aviso in body["avisos"])
+        assert body["coorte_stats"]["acertos"]["pct_mean"] > 0
+
 
 class TestProcessarCSVFormatMatrix:
     """End-to-end HTTP coverage of the (delimiter × header × id × format) grid.
@@ -1378,6 +1405,45 @@ class TestExportarExcel:
         assert "spreadsheetml" in resp.headers["content-type"]
         assert "attachment" in resp.headers["content-disposition"]
         assert len(resp.content) > 1000  # non-trivial xlsx file
+
+    @pytest.mark.api
+    def test_exportar_excel_usa_areas_processadas_quando_area_ausente(self, client: TestClient):
+        payload = {
+            "ano_referencia": 2024,
+            "areas_processadas": ["MT"],
+            "metodologia": {"metodo_principal": "Theta Ref Fixo"},
+            "n_alunos": 1,
+            "resultados": [
+                {
+                    "aluno_id": "A1",
+                    "acertos_mt": 30,
+                    "theta_mt": 0.15,
+                    "nota_mt": 762.8,
+                    "acert_dif_mt": 0.42,
+                    "estado_mt": "AVANCADO",
+                }
+            ],
+            "referencia": [
+                {"acertos": 30, "tri_min": 702.1, "tri_med": 762.8, "tri_max": 795.9},
+            ],
+            "diagnosticos": [{
+                "area": "MT", "n_itens": 45, "n_alunos": 1, "b_medio": 0.0,
+                "b_desvio": 1.0, "nota_media": 762.8, "nota_min": 762.8,
+                "nota_max": 762.8, "pct_dentro_intervalo": 100.0,
+                "itens_faceis": 10, "itens_medios": 28, "itens_dificeis": 7,
+                "acert_dif_medio": 0.42,
+            }],
+        }
+
+        resp = client.post("/api/v3/exportar-excel", json=payload)
+
+        assert resp.status_code == 200
+        assert "xtri_MT_2024_" in resp.headers["content-disposition"]
+        from openpyxl import load_workbook
+        wb = load_workbook(io.BytesIO(resp.content), read_only=True, data_only=True)
+        assert wb["Resumo"]["B5"].value == "MT"
+        assert wb["Resumo"]["B7"].value == "Theta Ref Fixo"
+        assert wb["Tabela Dificuldades"]["A1"].value == "Tabela de Dificuldades — MT / ENEM 2024"
 
     @pytest.mark.api
     def test_exportar_excel_com_grafico_base64(self, client: TestClient):
