@@ -56,7 +56,9 @@ def build_group_matrix(
     gab_arr = df_group[schema.tx_gabarito[area]].astype(str).to_numpy()
     nota_ref = _parse_nota_series(df_group[schema.nu_nota[area]]).to_numpy()
     lingua_arr = (
-        df_group[schema.tp_lingua].astype(str).to_numpy() if area == "LC" else None
+        df_group[schema.tp_lingua].astype(str).to_numpy()
+        if area == "LC" and schema.tp_lingua in df_group.columns
+        else None
     )
     rows: list[list[int]] = []
     notas: list[float] = []

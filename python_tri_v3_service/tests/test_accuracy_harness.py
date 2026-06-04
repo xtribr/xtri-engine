@@ -149,7 +149,14 @@ def test_kfold_indices_partition_and_no_leak():
     folds = _kfold_indices(100, k=5, seed=42)
     assert len(folds) == 5
     allidx = np.concatenate(folds)
+    assert len(allidx) == 100  # sem repetição (disjunção real)
     assert sorted(allidx.tolist()) == list(range(100))
+
+    # n não-divisível por k: partição ainda exata (sem off-by-one)
+    folds2 = _kfold_indices(103, k=5, seed=42)
+    allidx2 = np.concatenate(folds2)
+    assert len(allidx2) == 103
+    assert sorted(allidx2.tolist()) == list(range(103))
 
 
 @pytest.mark.unit
