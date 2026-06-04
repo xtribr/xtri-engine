@@ -58,3 +58,46 @@ def test_param_recovery_stats_perfect():
     assert stats["rmse"] == pytest.approx(0.0)
     assert stats["r"] == pytest.approx(1.0)
     assert stats["n"] == 4
+
+
+@pytest.mark.unit
+def test_mean_sigma_recovers_known_transform():
+    from app.evaluation.linking import mean_sigma_linking
+
+    rng = np.random.default_rng(1)
+    b_ours = rng.normal(0.0, 1.0, size=45)
+    A_true, B_true = 1.3, -0.4
+    b_official = A_true * b_ours + B_true
+    link = mean_sigma_linking(b_ours, b_official)
+    assert link.A == pytest.approx(A_true, abs=1e-6)
+    assert link.B == pytest.approx(B_true, abs=1e-6)
+
+
+@pytest.mark.unit
+def test_apply_linking_transforms_a_and_b():
+    from app.evaluation.linking import Linking, apply_linking
+
+    params = [{"a": 2.0, "b": 1.0, "c": 0.2}]
+    out = apply_linking(params, Linking(A=2.0, B=0.5))
+    assert out[0]["b"] == pytest.approx(2.0 * 1.0 + 0.5)
+    assert out[0]["a"] == pytest.approx(2.0 / 2.0)
+    assert out[0]["c"] == pytest.approx(0.2)
+
+
+@pytest.mark.unit
+def test_stocking_lord_recovers_known_transform():
+    from app.evaluation.linking import stocking_lord_linking
+
+    rng = np.random.default_rng(2)
+    a_f = rng.uniform(0.8, 2.2, size=45)
+    b_f = rng.uniform(-2.0, 2.0, size=45)
+    c_f = np.full(45, 0.2)
+    official = [{"a": a_f[j], "b": b_f[j], "c": c_f[j]} for j in range(45)]
+    A_true, B_true = 1.25, 0.3
+    ours = [
+        {"a": a_f[j] * A_true, "b": (b_f[j] - B_true) / A_true, "c": c_f[j]}
+        for j in range(45)
+    ]
+    link = stocking_lord_linking(ours, official)
+    assert link.A == pytest.approx(A_true, abs=0.05)
+    assert link.B == pytest.approx(B_true, abs=0.05)
