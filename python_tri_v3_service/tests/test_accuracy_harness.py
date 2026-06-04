@@ -260,3 +260,24 @@ def test_build_and_render_report(tmp_path):
     import json
     loaded = json.loads(out.read_text())
     assert loaded["year"] == 2024
+
+
+@pytest.mark.unit
+def test_run_recovery_for_group_end_to_end():
+    """Recuperação de parâmetro num grupo sintético com gabarito casado."""
+    from app.evaluation.__main__ import run_recovery_for_group
+
+    rng = np.random.default_rng(5)
+    gabarito = "A" * 45
+    b_official = np.linspace(-2, 2, 45)
+    official_items = [
+        {"a": 1.2, "b": float(b_official[j]), "c": 0.2, "posicao": 91 + j, "gabarito": "A"}
+        for j in range(45)
+    ]
+    theta = rng.normal(0, 1, size=800)
+    p = 0.2 + 0.8 / (1 + np.exp(-1.3 * (theta[:, None] - b_official[None, :])))
+    resp = (rng.uniform(size=p.shape) < p).astype(int)
+
+    rec = run_recovery_for_group(resp, gabarito, official_items)
+    assert set(rec.keys()) == {"mean_sigma", "stocking_lord"}
+    assert rec["stocking_lord"]["b"]["r"] > 0.9
