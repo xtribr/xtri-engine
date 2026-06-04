@@ -3,6 +3,13 @@
 
 Orquestra: carrega microdata real → k-fold ponta-a-ponta (4 áreas) →
 recuperação de parâmetro + atribuição (CN/MT/AZUL) → relatório JSON + tabela.
+
+Nota: atribuição/recuperação exigem alinhar as respostas à ordem oficial
+(posição global). O TX_GABARITO do microdata está na ordem embaralhada do
+caderno de cada cor; sem o mapa cor+posição→item (Supabase enem_itens_prova),
+nenhum caderno casa com a ordem oficial e essas seções são puladas com aviso.
+O k-fold ponta-a-ponta NÃO precisa desse alinhamento (calibra na ordem do
+próprio caderno) e sempre roda.
 """
 from __future__ import annotations
 
@@ -15,7 +22,6 @@ from app.evaluation.attribution import decompose_error, score_with_params
 from app.evaluation.ground_truth import (
     align_official_to_gabarito,
     load_official_params,
-    official_coprova,
     official_items,
 )
 from app.evaluation.kfold import (
@@ -69,12 +75,39 @@ def run_recovery_for_group(
     }
 
 
-def _azul_group_matrix(df, schema, area, co_prova_azul):
+def _find_azul_group(df, schema, area, official):
+    """Encontra o caderno cujo gabarito casa com a ordem oficial (posição global).
+
+    Os params oficiais estão em ordem de posição global do banco de itens; o
+    TX_GABARITO do microdata está na ordem embaralhada do caderno de cada cor.
+    O caderno cujo gabarito casa quase totalmente com o oficial é o que está na
+    ordem oficial. Offline (sem o mapa cor+posição→item do Supabase), nenhum
+    caderno do microdata está nessa ordem → retorna None.
+
+    Retorna (resp, nota_ref, valid_cols, official_valid, gab) ou None.
+    """
+    off_gab = "".join(it["gabarito"] for it in official)
     co_col = schema.co_prova[area]
-    g = df[df[co_col].astype(str) == str(co_prova_azul)]
-    resp, nota_ref = build_group_matrix(g, schema, area)
-    gab = g[schema.tx_gabarito[area]].astype(str).iloc[0] if len(g) else ""
-    return resp, nota_ref, gab
+    co_str = df[co_col].astype(str)
+    best = None  # (n_match, co_prova, gab)
+    for cp, n in co_str.value_counts().items():
+        if n < 500:
+            continue
+        gab = df.loc[co_str == cp, schema.tx_gabarito[area]].astype(str).iloc[0]
+        if len(gab) != len(off_gab):
+            continue
+        n_match = sum(1 for a, b in zip(off_gab, gab) if a == b)
+        if best is None or n_match > best[0]:
+            best = (n_match, cp, gab)
+    # Exige casamento quase total (tolera poucos itens anulados); senão não há
+    # caderno na ordem oficial neste dado.
+    if best is None or best[0] < len(off_gab) - 2:
+        return None
+    cp, gab = best[1], best[2]
+    sub = df[co_str == cp]
+    resp, nota_ref = build_group_matrix(sub, schema, area)
+    valid_cols, official_valid = align_official_to_gabarito(official, gab)
+    return resp, nota_ref, valid_cols, official_valid, gab
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -125,16 +158,19 @@ def main(argv: list[str] | None = None) -> int:
     attribution: dict = {}
     recovery: dict = {}
     for area in ATTR_AREAS:
-        co_azul = official_coprova(params_oficiais, args.year, area)
         official = official_items(params_oficiais, args.year, area)
-        resp, nota_ref, gab = _azul_group_matrix(df, schema, area, co_azul)
+        found = _find_azul_group(df, schema, area, official)
+        if found is None:
+            print(
+                f"AVISO: atribuição/recuperação {area} puladas — nenhum caderno do "
+                f"microdata está na ordem oficial (posição global). É necessário o mapa "
+                f"cor+posição→item (Supabase enem_itens_prova), indisponível offline.",
+                file=sys.stderr,
+            )
+            continue
+        resp, nota_ref, valid_cols, official_valid, gab = found
         if len(resp) < 500:
             print(f"AVISO: grupo AZUL {area} pequeno ({len(resp)}) — pulado.", file=sys.stderr)
-            continue
-        try:
-            valid_cols, official_valid = align_official_to_gabarito(official, gab)
-        except ValueError as exc:
-            print(f"AVISO: alinhamento {area} falhou: {exc}", file=sys.stderr)
             continue
 
         our_oof = kfold_oof_predictions(resp, area, tabela, k=args.kfolds, c_strategy=args.c_strategy)
