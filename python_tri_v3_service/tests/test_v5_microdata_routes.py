@@ -13,6 +13,8 @@ from app.main import app
 from app.microdata.cache import CACHE_ROOT, cache_key
 from app.microdata.jobs import job_manager
 from app.microdata.loader import default_csv_path
+from app.storage.artifacts import save_unidim_artifact
+from app.storage.model_registry import set_active_model
 
 PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
 
@@ -99,6 +101,192 @@ class TestPrepareAndJob:
         r = client.get("/api/v5/microdata/job/nonexistent-id-12345")
         assert r.status_code == 404
         assert "Unknown job_id" in r.json()["detail"]
+
+    @pytest.mark.api
+    def test_job_lifecycle_reflects_status_transitions(self, client):
+        """GET /job/{id} surfaces queued → running → done transitions."""
+        job = job_manager.create(year=2024, sample_size=1000, rng_seed=7)
+
+        # queued
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["job_id"] == job.job_id
+        assert data["status"] == "queued"
+        assert data["progress"] == 0.0
+        assert data["started_at"] is None
+
+        # running
+        job_manager.mark_running(job.job_id)
+        job_manager.update_progress(job.job_id, progress=0.42, stage="calibrating_LC")
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        data = r.json()
+        assert data["status"] == "running"
+        assert data["progress"] == pytest.approx(0.42)
+        assert data["stage"] == "calibrating_LC"
+        assert data["started_at"] is not None
+        assert data["elapsed_seconds"] is not None and data["elapsed_seconds"] >= 0
+
+        # done
+        from app.microdata.cache import CacheKey
+        fake_key = CacheKey(
+            year=2024,
+            source_hash="abcd1234abcd1234",
+            filters_hash="deadbeef",
+            stage="calibrated",
+        )
+        job_manager.mark_done(job.job_id, result_key=fake_key)
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        data = r.json()
+        assert data["status"] == "done"
+        assert data["progress"] == 1.0
+        assert data["stage"] == "done"
+        assert data["error"] is None
+
+    @pytest.mark.api
+    def test_job_error_path_surfaces_message(self, client):
+        """mark_error surfaces the error message via the job endpoint."""
+        job = job_manager.create(year=2024, sample_size=500, rng_seed=1)
+        job_manager.mark_running(job.job_id)
+        job_manager.mark_error(job.job_id, "CSV malformed at row 42")
+
+        r = client.get(f"/api/v5/microdata/job/{job.job_id}")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "error"
+        assert data["error"] == "CSV malformed at row 42"
+
+    @pytest.mark.api
+    def test_prepare_envia_pipeline_para_dispatcher_dedicado(self, client, tmp_path):
+        csv_path = tmp_path / "MICRODADOS_ENEM_2024.csv"
+        csv_path.write_text("NU_INSCRICAO,TP_PRESENCA_CN\n1,1\n", encoding="utf-8")
+
+        with mock.patch("app.main.default_csv_path", return_value=csv_path), mock.patch(
+            "app.main.submit_microdata_job"
+        ) as submit_mock:
+            r = client.post(
+                "/api/v5/microdata/prepare",
+                json={"year": 2024, "sample_size": 1234, "rng_seed": 99},
+            )
+
+        assert r.status_code == 200
+        data = r.json()
+        assert data["status"] == "queued"
+        submit_mock.assert_called_once()
+
+
+class TestMIRTAvailability:
+    @pytest.fixture(autouse=True)
+    def _clean_registry(self, temp_model_storage):
+        """Empty the shared model registry around each test in this class.
+
+        `temp_model_storage` is session-scoped, so other tests may have
+        populated it. Reset to a known-empty state before and after.
+        """
+        registry_path = temp_model_storage / "models" / "active_models.json"
+        snapshot = registry_path.read_bytes() if registry_path.is_file() else None
+        registry_path.parent.mkdir(parents=True, exist_ok=True)
+        registry_path.write_text("{}", encoding="utf-8")
+        try:
+            yield
+        finally:
+            if snapshot is None:
+                registry_path.unlink(missing_ok=True)
+            else:
+                registry_path.write_bytes(snapshot)
+
+    @pytest.mark.api
+    def test_empty_registry_reports_all_false(self, client, temp_model_storage):
+        r = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["ano_referencia"] == 2024
+        assert data["disponibilidade"] == {"LC": False, "CH": False, "CN": False, "MT": False}
+        assert data["total_artefatos"] == 0
+
+    @pytest.mark.api
+    def test_detects_mirt_artifact_per_area(self, client, temp_model_storage):
+        set_active_model(
+            {
+                "artifact_id": "job_mirt_mt_001",
+                "artifact_dir": str(temp_model_storage / "models" / "mirt" / "2024" / "MT"),
+                "simulado_id": "sim-mirt",
+                "scope_type": "simulado_id",
+                "scope_id": "sim-mirt",
+                "ano_referencia": 2024,
+                "area": "MT",
+                "modelo": "mirt_bifactor_mt_v1",
+                "saved_at_utc": "2026-04-19T00:00:00+00:00",
+            },
+            modelo="mirt_bifactor_mt_v1",
+        )
+
+        r = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["disponibilidade"]["MT"] is True
+        assert data["disponibilidade"]["LC"] is False
+        assert data["total_artefatos"] == 1
+
+    @pytest.mark.api
+    def test_filters_by_ano_referencia(self, client, temp_model_storage):
+        set_active_model(
+            {
+                "artifact_id": "job_mirt_lc_2023",
+                "artifact_dir": str(temp_model_storage / "models" / "mirt" / "2023" / "LC"),
+                "simulado_id": "sim-lc-2023",
+                "scope_type": "simulado_id",
+                "scope_id": "sim-lc-2023",
+                "ano_referencia": 2023,
+                "area": "LC",
+                "modelo": "mirt_bifactor_lc_v1",
+                "saved_at_utc": "2026-04-19T00:00:00+00:00",
+            },
+            modelo="mirt_bifactor_lc_v1",
+        )
+
+        r_2024 = client.get("/api/v5/mirt/availability?ano_referencia=2024")
+        assert r_2024.json()["disponibilidade"]["LC"] is False
+        r_2023 = client.get("/api/v5/mirt/availability?ano_referencia=2023")
+        assert r_2023.json()["disponibilidade"]["LC"] is True
+
+
+class TestRuntimeStatus:
+    @pytest.mark.api
+    def test_runtime_status_explica_fallback_sem_modelo(self, client, temp_model_storage):
+        r = client.get("/api/v5/runtime/status?ano_referencia=2024&simulado_id=sim-sem-modelo")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["app_support_dir"] == str(temp_model_storage)
+        assert data["directories"]["models"]["exists"] is True
+        assert data["status_areas"]["MT"] == "fallback_heuristico"
+
+    @pytest.mark.api
+    def test_runtime_status_lista_modelo_e_job(self, client, temp_model_storage):
+        manifest = save_unidim_artifact(
+            simulado_id="sim-modelo",
+            area="MT",
+            ano_referencia=2024,
+            c_fixo=0.20,
+            parametros_itens=[{"a": 1.2, "b": 0.3, "c": 0.2, "taxa_acerto": 0.55, "saturado": False}],
+            transformacao={"mu": 500.0, "sigma": 100.0, "metodo": "regressao_linear_lote"},
+            diagnostico={"n_alunos": 100, "n_itens": 45},
+            n_alunos=100,
+            n_itens=45,
+        )
+        set_active_model(manifest)
+
+        job = job_manager.create(year=2024, sample_size=1000, rng_seed=42)
+        job_manager.mark_running(job.job_id)
+
+        r = client.get("/api/v5/runtime/status?ano_referencia=2024&simulado_id=sim-modelo")
+        assert r.status_code == 200
+        data = r.json()
+
+        assert data["job_counts"]["running"] >= 1
+        assert any(model["artifact_id"] == manifest["artifact_id"] for model in data["models"])
+        assert data["status_areas"]["MT"] == "pronto"
+        assert data["directories"]["cache_microdata"]["path"].endswith("/cache/microdata")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -95,10 +95,22 @@ def fetch_all(client: Client, table: str, filter_eq: Optional[Dict] = None,
 
 def load_item_bank_and_transformacao(
     client: Client, ano: int, area: str
-) -> Tuple[Dict[int, List[dict]], Dict[str, float]]:
-    """Carrega itens por prova e a transformação (σ, μ)."""
+) -> Tuple[Dict[int, List[dict]], Dict[str, float], set[int]]:
+    """Carrega itens por prova, transformação (σ, μ) e provas de 1ª aplicação."""
     itens = fetch_all(client, "enem_itens", filter_eq={"ano": ano, "area": area})
     itens_idx = {it["co_item"]: it for it in itens}
+
+    codigos = fetch_all(client, "enem_codigos_prova", filter_eq={"ano": ano, "area": area})
+    provas_primeira = {
+        int(row["co_prova"])
+        for row in codigos
+        if row.get("co_prova") is not None and not row.get("is_reaplicacao", False)
+    }
+    if not provas_primeira:
+        raise ValueError(
+            f"Whitelist de primeira aplicação vazia para {area}/{ano}. "
+            "Validação em massa exige enem_codigos_prova.is_reaplicacao=false."
+        )
 
     maps = fetch_all(client, "enem_itens_prova", filter_eq={"ano": ano})
     provas: Dict[int, List[dict]] = defaultdict(list)
@@ -128,7 +140,7 @@ def load_item_bank_and_transformacao(
         "sigma": float(transf["sigma"]),
         "mu": float(transf["mu"]),
         "n_calibracao": transf["n_alunos"] or 0,
-    }
+    }, provas_primeira
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -136,7 +148,7 @@ def load_item_bank_and_transformacao(
 # ════════════════════════════════════════════════════════════════════════════════
 
 def eap_theta(responses: np.ndarray, item_params: List[dict], n_quad: int = 61) -> float:
-    theta_grid = np.linspace(-4, 4, n_quad)
+    theta_grid = np.linspace(-5, 5, n_quad)
     prior = norm.pdf(theta_grid, 0, 1)
     lk = np.ones(n_quad)
     for j, p in enumerate(item_params):
@@ -231,10 +243,11 @@ def validar_ano_area(
     print(f"{'─'*70}")
 
     # 1. Carregar item bank + transformação
-    item_bank, transf = load_item_bank_and_transformacao(client, ano, area)
+    item_bank, transf, provas_primeira = load_item_bank_and_transformacao(client, ano, area)
     sigma, mu = transf["sigma"], transf["mu"]
     print(f"  • σ={sigma:.4f}  μ={mu:.4f}  (calibrada com {transf['n_calibracao']} alunos)")
     print(f"  • {len(item_bank)} provas no banco")
+    print(f"  • {len(provas_primeira)} códigos de primeira aplicação")
 
     # 2. Localizar microdata
     rel = RESULTADOS_FILES.get(ano)
@@ -273,6 +286,10 @@ def validar_ano_area(
             try:
                 co_prova = int(row[f"CO_PROVA_{area}"])
             except (KeyError, ValueError, TypeError):
+                continue
+
+            if co_prova not in provas_primeira:
+                n_skipped_items += 1
                 continue
 
             items_prova = item_bank.get(co_prova)

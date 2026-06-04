@@ -4,7 +4,7 @@ Streaming loader for the official ENEM microdata CSV.
 This module is the entry point for the microdata analysis pipeline. It:
 
 1. Locates the CSV at a hardcoded path
-   (``/Volumes/KINGSTON/apps/apps/MIRT/microdata/MICRODADOS_ENEM_<year>.csv``).
+   (``/Volumes/KINGSTON/apps/MIRT/microdata/MICRODADOS_ENEM_<year>.csv``).
 2. Reads it in chunks via ``pd.read_csv(chunksize=100_000)`` with a column
    projection (``usecols=``) to keep peak memory under ~1 GB.
 3. Filters each chunk to valid first-application students using
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Hardcoded path per Q1 decision (single-user, stable KINGSTON location).
 # Caller can override by passing ``csv_path=`` explicitly.
-MICRODATA_DIR = Path("/Volumes/KINGSTON/apps/apps/MIRT/microdata")
+MICRODATA_DIR = Path("/Volumes/KINGSTON/apps/MIRT/microdata")
 FILENAME_TEMPLATE = "MICRODADOS_ENEM_{year}.csv"
 
 # Chunk size for streaming read. Tuned for ~1 GB peak RAM on a 16 GB Mac.

@@ -259,6 +259,282 @@ Two features described in the user's April 8 request (shared alongside `mente_ma
 
 ### Step 8 sub-decisions (recommended defaults, unless user overrides)
 
+### Phase 9 — Backlog Executável: 2PL, MIRT e Runtime Híbrido [pending]
+
+**Objetivo**
+
+Transformar a refatoração do motor estatístico e da arquitetura local em um
+backlog executável, com 3 frentes paralelas especializadas e um agente fixo de
+smoke tests rodando em toda entrega.
+
+**Agentes fixos**
+
+- `Agente 1 — Psicometria/2PL`
+  - Responsável pela Fase 1
+  - Corrige calibração, scoring e transformação `theta -> nota`
+- `Agente 2 — MIRT/R`
+  - Responsável pela Fase 2
+  - Introduz calibração multidimensional real via `R + mirt`
+- `Agente 3 — Desktop/Runtime`
+  - Responsável pela Fase 3
+  - Separa calibração pesada do scoring online no app local
+- `Agente Smoke`
+  - Responsável por rodar a menor bateria que detecta quebra estrutural antes
+    de merge
+  - Obrigatório em **todo PR**
+
+**Regras operacionais**
+
+- A Fase 1 é gate psicométrico. Nenhuma entrega da Fase 2 entra em produção
+  antes do contrato unidimensional estar estável.
+- A Fase 3 pode andar em paralelo com a Fase 1, desde que não redefina o
+  contrato de score.
+- Toda branch que mexer em scoring, API, jobs, desktop, cache, `irt/`,
+  `mirt/`, `runtime/`, `jobs/` ou `storage/` precisa acionar o `Agente Smoke`.
+- PR pequeno: smoke obrigatório.
+- Fechamento de milestone/fase: smoke + suíte completa.
+
+**Merge gates do Agente Smoke**
+
+- Fase 1 — 2PL unidimensional:
+  - `python3 -m pytest python_tri_v3_service/tests/test_cientifico.py python_tri_v3_service/tests/test_api.py -q`
+- Fase 2 — MIRT com R:
+  - `python3 -m pytest python_tri_v3_service/tests/test_api.py -q`
+  - `python3 -m pytest -k "mirt or worker or contract" -q`
+- Fase 3 — híbrido local / desktop:
+  - `python3 -m pytest python_tri_v3_service/tests/test_microdata_loader.py python_tri_v3_service/tests/test_v5_microdata_routes.py python_tri_v3_service/tests/test_api.py -q`
+  - `python3 -m pytest desktop/xtri-engine/tests/test_app.py -q`
+
+**Backlog executável**
+
+#### Epic A — Fase 1: 2PL unidimensional correto
+
+- [x] `PR-001` — Extrair o núcleo estatístico do motor científico
+  - Dono: `Agente 1 — Psicometria/2PL`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/motores/cientifico.py`
+    - `python_tri_v3_service/app/models.py`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/irt/contracts.py`
+    - `python_tri_v3_service/app/irt/scoring.py`
+    - `python_tri_v3_service/app/irt/transform.py`
+  - Entrega:
+    - separar calibração, scoring e transformação em camadas distintas
+    - parar de misturar ancoragem, parâmetros e resposta HTTP no mesmo módulo
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-002` — Implementar calibração conjunta `MML/EM` em matriz `N x J`
+  - Dono: `Agente 1 — Psicometria/2PL`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/irt/unidim_em.py`
+    - `python_tri_v3_service/app/motores/cientifico.py`
+    - `python_tri_v3_service/app/microdata/calibration.py`
+  - Entrega:
+    - remover a calibração item-a-item do fluxo principal
+    - suportar estimação conjunta dos parâmetros `a` e `b`
+  - Critérios de aceite:
+    - itens com mesma taxa de acerto deixam de colapsar no mesmo `a`
+    - testes sintéticos recuperam ordenação de parâmetros
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-003` — Fixar scoring individual e transformação estável `theta -> nota`
+  - Dono: `Agente 1 — Psicometria/2PL`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/irt/scoring.py`
+    - `python_tri_v3_service/app/irt/transform.py`
+    - `python_tri_v3_service/app/motores/cientifico.py`
+  - Entrega:
+    - usar `EAP` ou `MAP` consistente com a calibração
+    - substituir nota por coorte por transformação estável
+    - corrigir `estimar_theta_individual()` para não cair em `tri_med`
+  - Critérios de aceite:
+    - scoring individual e em lote batem usando o mesmo artefato
+    - a nota não depende mais da composição da coorte
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-004` — Conectar endpoints V3 ao novo contrato unidimensional
+  - Dono: `Agente 1 — Psicometria/2PL`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/main.py`
+    - `python_tri_v3_service/app/models.py`
+    - `python_tri_v3_service/tests/test_api.py`
+    - `python_tri_v3_service/tests/test_cientifico.py`
+  - Entrega:
+    - `/api/v3/calibrar-cientifico` e `/api/v3/estimar-theta` passam a usar o
+      mesmo contrato de artefato e transformação
+    - regressão de API preservada
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-005` — Persistir artefatos unidimensionais
+  - Dono: `Agente 1 — Psicometria/2PL`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/storage/artifacts.py`
+    - `python_tri_v3_service/app/storage/model_registry.py`
+  - Entrega:
+    - salvar `item_params.json`, `transformacao.json`, métricas e manifesto
+    - versionar por `ano/area/co_prova/modelo`
+  - Dependência:
+    - `PR-003`
+  - Gate:
+    - `Agente Smoke`
+
+#### Epic B — Fase 3: runtime híbrido local para o Mac M4 Pro
+
+- [x] `PR-006` — Formalizar diretório local de artefatos e cache
+  - Dono: `Agente 3 — Desktop/Runtime`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/microdata/cache.py`
+    - `desktop/xtri-engine/src/xtri_engine/app.py`
+  - Entrega:
+    - separar semanticamente `cache/` de `models/`
+    - preparar `~/Library/Application Support/XTRI Engine/`
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-007` — Tornar jobs persistíveis e isolar calibração pesada
+  - Dono: `Agente 3 — Desktop/Runtime`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/microdata/jobs.py`
+    - `python_tri_v3_service/app/main.py`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/jobs/calibration_jobs.py`
+  - Entrega:
+    - jobs com estado persistido
+    - calibração pesada fora do caminho síncrono do request
+  - Dependência:
+    - `PR-006`
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-008` — Fazer o runtime consumir artefatos calibrados
+  - Dono: `Agente 3 — Desktop/Runtime`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/main.py`
+    - `python_tri_v3_service/app/storage/model_registry.py`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/runtime/`
+  - Entrega:
+    - scoring online deixa de depender de dataframe bruto
+    - seleção de modelo ativo por `ano/área/prova`
+  - Dependência:
+    - `PR-005`
+    - `PR-007`
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-009` — Expor status de modelos e jobs no app desktop
+  - Dono: `Agente 3 — Desktop/Runtime`
+  - Arquivos alvo:
+    - `desktop/xtri-engine/src/xtri_engine/app.py`
+    - `python_tri_v3_service/app/main.py`
+  - Entrega:
+    - status: pronto, calibrando, falhou, desatualizado
+    - fallback explícito para heurístico quando faltar modelo válido
+  - Dependência:
+    - `PR-008`
+  - Gate:
+    - `Agente Smoke`
+
+#### Epic C — Fase 2: MIRT multidimensional real com `R + mirt`
+
+- [x] `PR-010` — Definir contrato MIRT e `Q-matrix`
+  - Dono: `Agente 2 — MIRT/R`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/mirt/contracts.py`
+    - `python_tri_v3_service/app/mirt/qmatrix.py`
+  - Entrega:
+    - contrato de entrada/saída do worker
+    - versão da `Q-matrix`
+    - definição do modelo inicial: bifactor ou `G + 2/3 fatores`
+  - Dependência:
+    - `PR-004`
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-011` — Criar worker `R` para calibração MIRT offline
+  - Dono: `Agente 2 — MIRT/R`
+  - Arquivos novos:
+    - `python_tri_v3_service/app/mirt/runner.py`
+    - `python_tri_v3_service/app/scripts/mirt_fit.R`
+    - `python_tri_v3_service/app/scripts/mirt_score.R`
+  - Entrega:
+    - subprocesso `Rscript`
+    - IO por `CSV/Parquet + JSON`
+    - artefatos MIRT versionados
+  - Gate:
+    - `Agente Smoke`
+
+- [x] `PR-012` — Integrar artefatos MIRT ao backend com fallback para unidim
+  - Dono: `Agente 2 — MIRT/R`
+  - Arquivos alvo:
+    - `python_tri_v3_service/app/main.py`
+    - `python_tri_v3_service/app/models.py`
+    - `python_tri_v3_service/app/storage/model_registry.py`
+  - Entrega:
+    - leitura de scores multidimensionais
+    - fallback limpo para unidim quando `R/mirt` não existir
+  - Dependência:
+    - `PR-011`
+    - `PR-008`
+  - Gate:
+    - `Agente Smoke`
+
+- [ ] `PR-013` — Expor o modo MIRT na UX local sem quebrar o fluxo padrão
+  - Dono: `Agente 2 — MIRT/R` + `Agente 3 — Desktop/Runtime`
+  - Arquivos alvo:
+    - `desktop/xtri-engine/src/xtri_engine/app.py`
+    - `python_tri_v3_service/app/main.py`
+  - Entrega:
+    - opção avançada de MIRT
+    - runtime padrão continua sendo `2PL + artefato congelado`
+  - Dependência:
+    - `PR-012`
+  - Gate:
+    - `Agente Smoke`
+
+**Sequência recomendada de execução**
+
+- Sprint 1:
+  - `PR-001`
+  - `PR-006`
+- Sprint 2:
+  - `PR-002`
+  - `PR-007`
+- Sprint 3:
+  - `PR-003`
+  - `PR-004`
+  - `PR-008`
+- Sprint 4:
+  - `PR-005`
+  - `PR-009`
+  - `PR-010`
+- Sprint 5:
+  - `PR-011`
+  - `PR-012`
+- Sprint 6:
+  - `PR-013`
+
+**Definição de pronto por fase**
+
+- Fase 1 pronta:
+  - 2PL correto
+  - scoring individual consistente
+  - transformação estável
+  - `Agente Smoke` passou
+- Fase 2 pronta:
+  - `R + mirt` gera artefatos reutilizáveis
+  - fallback para unidim validado
+  - `Agente Smoke` passou
+- Fase 3 pronta:
+  - app sobe sem recalibrar
+  - scoring rápido usa artefatos
+  - calibração pesada não trava a UI
+  - `Agente Smoke` passou
+
 **Q8 — Port selection**: **(A) Hardcode 5003** — matches dev workflow, user is single-user.
 - Alt (C): try 5003 first, fall back to random if busy. Switch to (C) only if 5003 conflicts in practice.
 

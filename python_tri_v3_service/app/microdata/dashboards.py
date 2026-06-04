@@ -10,26 +10,44 @@ All chart functions return PNG bytes (raw, not base64). Callers in Phase 5
 endpoints will base64-encode them for inline `<img src="data:image/png;...">`
 embedding in the frontend.
 
-CRITICAL: ``matplotlib.use('Agg')`` is set at module-import time before any
-pyplot import. The FastAPI worker thread has no GUI backend (no Cocoa, no Tk),
-and an interactive backend would crash with "main thread is not in main loop".
+Backend selection: matplotlib is imported LAZILY via ``_get_plt()`` on the
+first render call. For the Mac .app, matplotlib (+ its font/image deps) is
+~60 MB of cold-load cost that only matters when the user opens the microdata
+page. ``_get_plt()`` forces the ``Agg`` backend before any pyplot import so
+FastAPI worker threads never try to attach to Cocoa/Tk (would crash with
+"main thread is not in main loop"). Safe to call repeatedly.
 """
 
 from __future__ import annotations
 
+import functools
 import io
 import logging
 from typing import Any, Optional
 
-import matplotlib
+import numpy as np
+import pandas as pd
 
-matplotlib.use("Agg")  # MUST come before pyplot import — no GUI backend in workers
+from app.microdata.schema import AREAS
 
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
 
-from app.microdata.schema import AREAS  # noqa: E402
+@functools.lru_cache(maxsize=None)
+def _get_plt():
+    """Lazy-load matplotlib.pyplot with the Agg backend.
+
+    Decorated with ``lru_cache`` so the body runs exactly once even across
+    racing FastAPI worker threads — the cache populates under the GIL,
+    eliminating the TOCTOU on ``matplotlib.get_backend() + use('Agg')``.
+
+    Returns:
+        The pyplot module. Lets the Mac .app skip ~60 MB of cold matplotlib
+        load until the user actually opens the microdata page.
+    """
+    import matplotlib
+    if matplotlib.get_backend().lower() != "agg":
+        matplotlib.use("Agg", force=True)
+    import matplotlib.pyplot as plt  # noqa: PLC0415
+    return plt
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +258,7 @@ def render_area_dashboard(df: pd.DataFrame, area: str, *, dpi: int = 110) -> byt
     if area not in AREAS:
         raise ValueError(f"Unknown area: {area}")
     color = AREA_COLORS[area]
+    plt = _get_plt()
 
     fig, axes = plt.subplots(1, 3, figsize=(12, 4))
     _v3_vs_ref_scatter(axes[0], df, area, color)
@@ -281,6 +300,7 @@ def render_full_report(
     Returns:
         Raw PNG bytes.
     """
+    plt = _get_plt()
     fig, axes = plt.subplots(4, 3, figsize=(13, 14))
 
     for row, area in enumerate(AREAS):
@@ -313,6 +333,7 @@ def render_difficulty_table_png(df: pd.DataFrame, area: str, *, dpi: int = 110) 
     Three columns mirroring the PDF layout.
     """
     rows = compute_difficulty_table(df, area)
+    plt = _get_plt()
     if not rows:
         fig = plt.figure(figsize=(10, 1.5))
         plt.text(0.5, 0.5, f"{area}: sem dados", ha="center", va="center", fontsize=12)

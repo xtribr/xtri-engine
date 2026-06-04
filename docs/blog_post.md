@@ -1,6 +1,6 @@
-# We Reverse-Engineered Brazil's Biggest Exam — And Matched INEP's Scores Perfectly
+# We Rebuilt Brazil's Biggest Exam Scoring Pipeline — And Validated It Against INEP Microdata
 
-*How we validated an open-source IRT scoring engine against 360,000 real ENEM students and discovered that the textbook formula is wrong.*
+*How we validated an IRT scoring engine against 360,000 real ENEM students and found that the textbook formula is incomplete.*
 
 ---
 
@@ -12,7 +12,7 @@ For the last 15 years, INEP (the government agency that runs ENEM) has scored th
 
 Two students can have the same number of correct answers and get very different scores. That's not a bug — that's the whole point of the model. If Ana answered the hard items and missed the easy ones, the model is suspicious. If Beatriz answered the easy items consistently and got some hard ones too, the model rewards her consistency. It's an elegant idea, and for better or worse, it shapes the futures of millions of Brazilian teenagers every year.
 
-But here's the thing: **nobody outside INEP had ever proven, at the individual-student level, that they could reproduce INEP's scores exactly.** Simulado platforms (commercial test-prep services that offer "ENEM-like" exams) all claim to produce "ENEM-compatible" scores. Private tutoring schools claim the same. Nobody has ever published a benchmark showing how close their implementation really is to INEP's real calculation.
+But here's the thing: **nobody outside INEP had published a transparent, individual-student benchmark showing how close an independent reconstruction can get to the official scores.** Simulado platforms (commercial test-prep services that offer "ENEM-like" exams) all claim to produce "ENEM-compatible" scores. Private tutoring schools claim the same. Nobody has ever published a benchmark showing how close their implementation really is to the public INEP score artifacts.
 
 We decided to find out.
 
@@ -20,7 +20,7 @@ We decided to find out.
 
 ## What We Built
 
-Over the past couple of weeks, we built **XTRI Engine** — an open-source Python implementation of the entire ENEM scoring pipeline. It does three things:
+Over the past couple of weeks, we built **XTRI Engine** — a Python implementation of an ENEM-aligned scoring pipeline. It does three things:
 
 1. **Calibration** — Takes the binary correct/incorrect response matrix of a group of students and estimates each item's difficulty, discrimination, and guessing parameters using Marginal Maximum Likelihood with Gauss-Hermite quadrature. This is the same algorithm INEP uses, just written from scratch.
 
@@ -84,9 +84,9 @@ We ran the XTRI Engine on the same students and compared score to score. Here's 
 | 2024 | CN | 30,000 | **1.000000** | 0.025 | 99.94% |
 | 2024 | MT | 30,000 | **1.000000** | 0.025 | 99.99% |
 
-**Pearson correlation of 1.000000 across all 360,000 students.** Mean absolute error of 0.025 points on a scale that goes from 0 to 1000. The 95th percentile of errors is 0.048 points.
+**Pearson correlation of 1.000000 across all 360,000 students under the public-data reconstruction protocol.** Mean absolute error of 0.025 points on a scale that goes from 0 to 1000. The 95th percentile of errors is 0.048 points.
 
-To put that in perspective: if your real ENEM score is 672.5, the XTRI Engine predicts you got 672.5. If a student's real score is 891.3, XTRI says 891.3. We checked 360,000 of these comparisons. The differences that remain are literally at the floor of IEEE 754 floating-point rounding from the numerical integration — they are not methodological errors. They are physics.
+To put that in perspective: in this benchmark, when the official item parameters and year-area transformation are available, XTRI reconstructs the published `NU_NOTA_*` values to within tiny numerical residuals. We checked 360,000 of these comparisons. The differences that remain are consistent with numerical integration and rounding, not with a visible systematic bias.
 
 The largest absolute error in the entire dataset was 8.19 points, on one single Languages 2024 student whose response pattern triggered a near-degenerate posterior. Everyone else was within 0.5 points, and 95% were within 0.05 points. On the five-tier pedagogical classification (Iniciante, Elementar, Básico, Proficiente, Avançado), **99.96% of our scores put students in the same category as INEP did.** The tiny residual disagreement is always students who fall within half a point of a level boundary.
 
@@ -96,11 +96,11 @@ The largest absolute error in the entire dataset was 8.19 points, on one single 
 
 Three things come out of this that are worth thinking about.
 
-**First**, independent audit is now possible. Any Brazilian student with a computer can download their own ENEM microdata, run XTRI Engine on their own responses, and verify their own score to within a quarter of a point. This has never been possible before. Up until now, if you thought your ENEM score was wrong, your only recourse was INEP's internal review process. Now you have an independent reference implementation that you can check against. If you get a different answer than INEP does, one of you has made an error — and you can prove which one.
+**First**, independent audit is now more concrete. With the same public item parameters, response vectors, and transformation table, researchers can reconstruct published scores and investigate discrepancies as data-alignment or implementation issues.
 
-**Second**, commercial platforms can finally be benchmarked honestly. There are dozens of Brazilian test-prep platforms that claim to produce "ENEM-compatible" scores. We can now measure how close any of them actually gets. Our own V3 "local calibration" mode — which calibrates items from scratch using only the simulado's own responses, without access to INEP's parameters — has a mean absolute error of 73 points on real ENEM data. That's a lot. It's what you'd expect from calibrating 45 items on 400 students, and there's no way to reduce it without access to the national-scale calibration data. If a commercial platform claims better precision than that without using the official items, they're either wrong or cheating.
+**Second**, commercial platforms can finally be benchmarked honestly. There are dozens of Brazilian test-prep platforms that claim to produce "ENEM-compatible" scores. We can now measure how close any of them actually gets. Our own V3 "local calibration" mode — which calibrates items from scratch using only the simulado's own responses, without access to INEP's parameters — has a mean absolute error of 73 points on real ENEM data in the current 400-student experiment. That's a lot. It is what we observed when calibrating 45 items on a small local cohort, and it shows why any precision claim for non-official simulados must be validated against real data.
 
-**Third** — and this is the most interesting to us — it means the ENEM scoring pipeline is **genuinely reproducible**. This is not always true of high-stakes testing. Many testing agencies around the world treat their scoring algorithms as proprietary secrets, and neither candidates nor researchers can verify them. INEP, to their credit, publishes the item parameters and the response microdata openly. We used nothing else. No insider information, no leaked code, no private consultation. Just the public data and standard psychometric methods. And we got to 1.000000 correlation.
+**Third** — and this is the most interesting to us — it means the published ENEM scores are **empirically reproducible from public artifacts**. This is not always true of high-stakes testing. Many testing agencies around the world treat their scoring algorithms as proprietary secrets, and neither candidates nor researchers can verify them. INEP, to its credit, publishes the item parameters and the response microdata openly. We used public data and standard psychometric methods, and got to 1.000000 correlation under the documented protocol.
 
 That's a good institution doing the right thing.
 
@@ -116,7 +116,7 @@ Here's the consequence: under 3PL, a student who has low overall Math ability bu
 
 Primi and Cicchetto found that roughly **33% of the 2015 Math participants** were in this situation — above-average on the secondary factor, below-average on the primary one. These are real students whose knowledge is real but whose scoring model can't see it.
 
-The XTRI Engine preserves this behavior exactly, because we're reproducing INEP's model faithfully. But we're also working on a multidimensional extension (MIRT) that would fix this. It's not ready yet — MIRT calibration requires much larger samples (50,000+) and the math is harder — but it's coming. In the meantime, our benchmark proves that if you want to reproduce INEP's scoring as it is today, you can do it to the decimal place.
+The XTRI Engine preserves this behavior when operating in V4 with official item parameters, because it follows the public 3PL reconstruction path. But we're also working on a multidimensional extension (MIRT) that would address this limitation. It's not ready yet — MIRT calibration requires much larger samples and stronger validation — but it's coming. In the meantime, our benchmark shows that the published ENEM scores can be reconstructed to very high empirical precision when the official item bank is available.
 
 ---
 
@@ -154,6 +154,6 @@ If any of this sounds interesting — if you're a psychometrician who wants to c
 
 ---
 
-**Alexandre Emerson Melo de Araújo** builds XTRI, an open-source psychometrics platform focused on Brazilian educational assessment. He is based in Brazil and can be reached through the [XTRI Engine GitHub repository](https://github.com/xtribr/xtri-engine).
+**Alexandre Emerson Melo de Araújo** builds XTRI, a psychometrics platform focused on Brazilian educational assessment. He is based in Brazil and can be reached through the [XTRI Engine GitHub repository](https://github.com/xtribr/xtri-engine).
 
 *Published April 2026. All data from public INEP microdata. No identifying student information was used.*

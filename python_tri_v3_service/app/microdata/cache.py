@@ -6,7 +6,11 @@ Saves the expensive result of :func:`app.microdata.loader.load_microdata`
 complete in <2s.
 
 Cache location:
-    ``~/Library/Application Support/XTRI Engine/microdata_cache/<year>/``
+    ``~/Library/Application Support/XTRI Engine/cache/microdata/<year>/``
+
+Legacy compatibility:
+    Reads also from ``~/Library/Application Support/XTRI Engine/microdata_cache/``
+    while o runtime desktop migra para o layout novo.
 
 Each cache entry is:
     ``<source_hash[:16]>_<filters_hash[:8]>.parquet``    — the DataFrame
@@ -23,18 +27,18 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
 
+from ..runtime.local_paths import LEGACY_MICRODATA_CACHE_ROOT, MICRODATA_CACHE_ROOT
+
 logger = logging.getLogger(__name__)
 
-CACHE_ROOT = (
-    Path.home() / "Library" / "Application Support" / "XTRI Engine" / "microdata_cache"
-)
+CACHE_ROOT = MICRODATA_CACHE_ROOT
+LEGACY_CACHE_ROOT = LEGACY_MICRODATA_CACHE_ROOT
 
 
 @dataclass(frozen=True)
@@ -149,23 +153,27 @@ def load_cached(key: CacheKey) -> Optional[pd.DataFrame]:
     Gracefully handles the case where ``pyarrow`` is missing — logs a warning
     and returns ``None`` so the caller falls back to re-reading the CSV.
     """
-    if not key.parquet_path.is_file():
-        return None
-    try:
-        df = pd.read_parquet(key.parquet_path)
-        logger.info(
-            "Cache HIT: %s (%s rows)", key.parquet_path.name, f"{len(df):,}"
-        )
-        return df
-    except ImportError:
-        logger.warning(
-            "pyarrow not installed — cannot read Parquet cache. "
-            "Install pyarrow to enable caching."
-        )
-        return None
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Cache read failed for %s: %s", key.parquet_path, exc)
-        return None
+    candidate_paths = [
+        key.parquet_path,
+        LEGACY_CACHE_ROOT / str(key.year) / key.parquet_path.name,
+    ]
+    for candidate in candidate_paths:
+        if not candidate.is_file():
+            continue
+        try:
+            df = pd.read_parquet(candidate)
+            logger.info("Cache HIT: %s (%s rows)", candidate.name, f"{len(df):,}")
+            return df
+        except ImportError:
+            logger.warning(
+                "pyarrow not installed — cannot read Parquet cache. "
+                "Install pyarrow to enable caching."
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Cache read failed for %s: %s", candidate, exc)
+            return None
+    return None
 
 
 def save_cached(
@@ -220,29 +228,30 @@ def save_cached(
 
 def clear_year_cache(year: int) -> int:
     """Remove all cache entries for a given year. Returns number of files deleted."""
-    year_dir = CACHE_ROOT / str(year)
-    if not year_dir.is_dir():
-        return 0
     count = 0
-    for entry in year_dir.iterdir():
-        if entry.is_file():
-            try:
-                entry.unlink()
-                count += 1
-            except OSError:
-                pass
+    for year_dir in (CACHE_ROOT / str(year), LEGACY_CACHE_ROOT / str(year)):
+        if not year_dir.is_dir():
+            continue
+        for entry in year_dir.iterdir():
+            if entry.is_file():
+                try:
+                    entry.unlink()
+                    count += 1
+                except OSError:
+                    pass
     return count
 
 
 def cache_size_bytes() -> int:
     """Total bytes consumed by the microdata cache directory."""
-    if not CACHE_ROOT.is_dir():
-        return 0
     total = 0
-    for path in CACHE_ROOT.rglob("*"):
-        if path.is_file():
-            try:
-                total += path.stat().st_size
-            except OSError:
-                pass
+    for cache_root in (CACHE_ROOT, LEGACY_CACHE_ROOT):
+        if not cache_root.is_dir():
+            continue
+        for path in cache_root.rglob("*"):
+            if path.is_file():
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    pass
     return total

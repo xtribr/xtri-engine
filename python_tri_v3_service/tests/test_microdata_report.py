@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.microdata.report import (
     DEFAULT_MODEL,
+    MAX_TOKENS,
     _pick_difficulty_highlights,
     build_payload,
     build_prompt,
@@ -205,7 +206,7 @@ class TestGenerateReport:
         instance = instance_holder["last"]
         kwargs = instance.messages.last_kwargs
         assert kwargs["model"] == DEFAULT_MODEL
-        assert kwargs["max_tokens"] == 4096
+        assert kwargs["max_tokens"] == MAX_TOKENS
         assert len(kwargs["messages"]) == 1
         user_msg = kwargs["messages"][0]
         assert user_msg["role"] == "user"
@@ -272,3 +273,77 @@ class TestReportEndpoint:
             r = client.post("/api/v5/microdata/report/2024?area=MT")
         assert r.status_code == 501
         assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# /api/v5/microdata/report/{year}/full endpoint (4-area comparative report)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFullReportEndpoint:
+    @pytest.fixture
+    def client(self):
+        return TestClient(app)
+
+    @pytest.mark.api
+    def test_missing_csv_returns_404(self, client):
+        r = client.post("/api/v5/microdata/report/9999/full")
+        assert r.status_code == 404
+
+    @pytest.mark.api
+    def test_missing_api_key_returns_501(self, client, monkeypatch):
+        from app.microdata.cache import cache_key
+        from app.microdata.loader import default_csv_path
+
+        csv_path = default_csv_path(2024)
+        if not csv_path.is_file():
+            pytest.skip("MICRODADOS_ENEM_2024.csv not on disk")
+        raw_key = cache_key(csv_path, year=2024, sample_size=200_000, rng_seed=42)
+        if not raw_key.with_stage("calibrated").parquet_path.is_file():
+            pytest.skip("calibrated cache not present")
+
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        with patch("app.microdata.report._load_api_key", return_value=None):
+            r = client.post("/api/v5/microdata/report/2024/full")
+        assert r.status_code == 501
+        assert "ANTHROPIC_API_KEY" in r.json()["detail"]
+
+    @pytest.mark.api
+    def test_happy_path_with_mocked_anthropic(self, client, monkeypatch):
+        """Full-report succeeds end-to-end with a mocked Anthropic client."""
+        from app.microdata.cache import cache_key
+        from app.microdata.loader import default_csv_path
+
+        csv_path = default_csv_path(2024)
+        if not csv_path.is_file():
+            pytest.skip("MICRODADOS_ENEM_2024.csv not on disk")
+        raw_key = cache_key(csv_path, year=2024, sample_size=200_000, rng_seed=42)
+        if not raw_key.with_stage("calibrated").parquet_path.is_file():
+            pytest.skip("calibrated cache not present")
+
+        fake = _fake_anthropic_response(
+            "# Panorama 4 Áreas\n\nAnálise comparativa de LC/CH/CN/MT."
+        )
+        instance_holder: dict[str, Any] = {}
+
+        def _fake_ctor(api_key: str):
+            instance = _FakeAnthropic(api_key, fake)
+            instance_holder["last"] = instance
+            return instance
+
+        fake_module = types.SimpleNamespace(Anthropic=_fake_ctor)
+        monkeypatch.setitem(__import__("sys").modules, "anthropic", fake_module)
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test-full")
+
+        r = client.post("/api/v5/microdata/report/2024/full")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["year"] == 2024
+        assert data["area"] == "ALL"
+        assert "Panorama" in data["markdown"]
+        # Full report uses FULL_MAX_TOKENS, not MAX_TOKENS
+        from app.microdata.report import FULL_MAX_TOKENS
+        assert (
+            instance_holder["last"].messages.last_kwargs["max_tokens"]
+            == FULL_MAX_TOKENS
+        )

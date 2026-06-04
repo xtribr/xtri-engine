@@ -23,6 +23,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
+from app.runtime.local_paths import APP_SUPPORT_ROOT, ensure_app_support_layout
+
 # Load .env BEFORE uvicorn imports app.main. main.py has its own dotenv loader,
 # but it uses __file__-relative paths that don't resolve correctly in a packaged
 # .app (where __file__ is inside Contents/Resources/app_packages/, not the repo).
@@ -32,7 +34,7 @@ try:
     from dotenv import load_dotenv
 
     for _env_candidate in (
-        Path.home() / "Library" / "Application Support" / "XTRI Engine" / ".env",
+        APP_SUPPORT_ROOT / ".env",
         Path("/Volumes/KINGSTON/apps/apps/MIRT/.env"),
     ):
         if _env_candidate.exists():
@@ -48,12 +50,19 @@ from toga.style.pack import Pack
 
 HOST = "127.0.0.1"
 PORT = 5003
-APP_URL = f"http://{HOST}:{PORT}/"
+APP_URL = f"http://{HOST}:{PORT}/?anchor_method=theta_ref_fixo&client=toga"
 HEALTH_URL = f"http://{HOST}:{PORT}/health"
+RUNTIME_STATUS_URL = f"http://{HOST}:{PORT}/api/v5/runtime/status"
 
 STARTUP_TIMEOUT_S = 60.0  # cold scipy/pandas/supabase imports + JSON load → ~20-30s
 POLL_INTERVAL_S = 0.25
 SHUTDOWN_TIMEOUT_S = 5.0
+
+
+def prepare_local_runtime_dirs():
+    """Garante a árvore mínima do runtime local antes de subir o backend."""
+
+    return ensure_app_support_layout()
 
 
 class _XTRIServer(uvicorn.Server):
@@ -83,6 +92,7 @@ class XTRIEngine(toga.App):
         # becomes a zombie, and uvicorn keeps running. Catch everything, force
         # cleanup, then hard-exit.
         try:
+            self._runtime_layout = prepare_local_runtime_dirs()
             self._start_backend()
             self._wait_for_ready()
         except BaseException as exc:

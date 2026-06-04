@@ -116,10 +116,83 @@ class ResponseCalibrarCientifico(BaseModel):
     n_itens: int
     parametros_itens: List[ItemParametros]
     resultados_alunos: List[ResultadoAlunoCientifico]
+    transformacao: Optional[Dict[str, Any]] = None
+    artefato_id: Optional[str] = Field(
+        default=None,
+        description="Artefato local salvo para o modelo unidimensional desta calibração",
+    )
     diagnostico: Dict[str, Any] = Field(
         default_factory=dict,
         description="Métricas de qualidade: % no intervalo, MAE, itens saturados"
     )
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — V6 ESCALA REDUZIDA
+# ════════════════════════════════════════════════════════════════════════════════
+
+class RequestTRIReduzida(BaseModel):
+    """Payload de entrada para /api/v6/tri/reduzida."""
+    simulado_id: str = Field(..., description="Identificador do simulado reduzido")
+    area: str = Field(..., description="Área: LC, CH, CN ou MT")
+    ano_referencia: int = Field(default=2024, description="Ano da escala ENEM")
+    c_fixo: float = Field(default=0.20, description="Acerto casual fixo")
+    itens_anulados: List[int] = Field(default_factory=list)
+    alunos: List[RespostaAlunoCientifico]
+
+
+class Intervalo95Reduzido(BaseModel):
+    """Intervalo aproximado de 95% para a nota projetada."""
+    limite_inferior: float
+    limite_superior: float
+    se_theta_ajustado: float
+    fator_reducao: float
+
+
+class FaixaReferenciaReduzida(BaseModel):
+    """Faixa oficial interpolada a partir de acertos equivalentes em 45 itens."""
+    acertos_equivalentes_45: float
+    acertos_base_inferior: int
+    acertos_base_superior: int
+    tri_min: float
+    tri_med: float
+    tri_max: float
+
+
+class ResultadoAlunoTRIReduzida(BaseModel):
+    """Resultado por aluno para TRI com escala reduzida."""
+    aluno_id: str
+    nome: Optional[str] = ""
+    acertos_observados: int
+    n_itens_validos: int
+    pct_acerto: float
+    acertos_equivalentes_45: float
+    theta: float
+    se_theta: float
+    nota_enem_projetada: float
+    intervalo_95: Intervalo95Reduzido
+    precisao: str
+    faixa_referencia: FaixaReferenciaReduzida
+    aviso_metodologico: str
+
+
+class ResponseTRIReduzida(BaseModel):
+    """Payload de saída para /api/v6/tri/reduzida."""
+    status: str
+    simulado_id: str
+    area: str
+    ano_referencia: int
+    modo_scoring: str
+    modo_escala: str
+    n_itens_referencia: int
+    n_itens_validos: int
+    n_alunos: int
+    metodo_ancoragem: str
+    limites_uso: str
+    resultados: List[ResultadoAlunoTRIReduzida]
+    parametros_itens: List[ItemParametros]
+    diagnostico: Dict[str, Any] = Field(default_factory=dict)
+    avisos: List[str] = Field(default_factory=list)
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -140,7 +213,22 @@ class RequestEstimarTheta(BaseModel):
     """
     area: str
     ano_referencia: int = 2024
-    parametros_itens: List[ItemPreCalibrado]
+    simulado_id: Optional[str] = Field(
+        default=None,
+        description="Escopo do modelo ativo local quando `parametros_itens` não vier",
+    )
+    artefato_id: Optional[str] = Field(
+        default=None,
+        description="ID explícito do artefato local a ser reutilizado",
+    )
+    parametros_itens: Optional[List[ItemPreCalibrado]] = Field(
+        default=None,
+        description="Parâmetros calibrados enviados no payload; opcionais se houver artefato local",
+    )
+    transformacao: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Transformação opcional `theta -> nota` com campos `mu` e `sigma`"
+    )
     respostas: List[int] = Field(
         ...,
         description="Vetor binário de respostas (0/1)"
@@ -154,6 +242,70 @@ class ResponseEstimarTheta(BaseModel):
     se: float
     nota_ancorada: float
     estado_tri: str
+    artefato_id: Optional[str] = Field(
+        default=None,
+        description="Artefato local reaproveitado na estimação, quando aplicável",
+    )
+
+
+class RequestEstimarThetaMIRT(BaseModel):
+    """
+    Payload para /api/v5/mirt/estimar-theta.
+    Tenta scorear via artefato MIRT local e, se necessário, cai para unidim.
+    """
+
+    area: str
+    ano_referencia: int = 2024
+    simulado_id: Optional[str] = Field(
+        default=None,
+        description="Escopo lógico do modelo ativo local",
+    )
+    artefato_id: Optional[str] = Field(
+        default=None,
+        description="ID explícito do artefato MIRT a ser reutilizado",
+    )
+    transformacao: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Transformação opcional `theta -> nota` com campos `mu` e `sigma`",
+    )
+    permitir_fallback_unidim: bool = Field(
+        default=True,
+        description="Se True, cai para o modelo unidimensional quando o MIRT não estiver disponível",
+    )
+    respostas: List[int] = Field(
+        ...,
+        description="Vetor binário de respostas (0/1)",
+    )
+
+
+class ResponseEstimarThetaMIRT(BaseModel):
+    """Payload de saída para /api/v5/mirt/estimar-theta."""
+
+    acertos: int
+    theta: float
+    se: float
+    nota_ancorada: float
+    estado_tri: str
+    artefato_id: Optional[str] = Field(
+        default=None,
+        description="Artefato local efetivamente usado na estimação",
+    )
+    modelo_usado: str = Field(
+        ...,
+        description="`mirt` quando o score multidimensional foi usado; `unidim` no fallback",
+    )
+    fallback_modelo: Optional[str] = Field(
+        default=None,
+        description="Modelo originalmente tentado antes do fallback, quando aplicável",
+    )
+    scores_mirt: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Scores por fator retornados pelo worker MIRT",
+    )
+    se_mirt: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Erros padrão por fator retornados pelo worker MIRT",
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -443,6 +595,11 @@ class ResultadoComparacao(BaseModel):
     theta_v4: float
     nota_v4: float
     estado_v4: str
+    # Primi acert_dif computed from INEP's official item difficulties (b > 1.5).
+    # Lets the frontend color V4 dots by hard-item mastery using ground-truth
+    # difficulties instead of the local V3 calibration. Default 0.0 when the
+    # prova has no items classified as "hard" by INEP.
+    acert_dif_v4: float = 0.0
     # Diferença
     diff: float
 
@@ -560,3 +717,54 @@ class MicrodataFullReportResponse(BaseModel):
     n_students: int
     summaries: Dict[str, MicrodataAreaSummary]
     full_report_png_base64: str
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — Runtime local / desktop
+# ════════════════════════════════════════════════════════════════════════════════
+
+
+class RuntimeDirectoryStatus(BaseModel):
+    """Estado resumido de um diretório do runtime local."""
+    path: str
+    exists: bool
+    writable: bool = False
+    file_count: int = 0
+    size_bytes: int = 0
+
+
+class RuntimeModelStatus(BaseModel):
+    """Resumo de um modelo ativo conhecido pelo registry local."""
+    ano_referencia: int
+    area: str
+    scope_id: str
+    modelo: str
+    artifact_id: Optional[str] = None
+    artifact_dir: Optional[str] = None
+    saved_at_utc: Optional[str] = None
+    status: str
+
+
+class RuntimeJobStatus(BaseModel):
+    """Resumo de um job local em memória, exposto ao desktop."""
+    job_id: str
+    year: int
+    sample_size: int
+    rng_seed: int
+    status: str
+    progress: float = 0.0
+    stage: Optional[str] = None
+    elapsed_seconds: Optional[float] = None
+    error: Optional[str] = None
+
+
+class RuntimeDesktopStatusResponse(BaseModel):
+    """Snapshot do runtime local para o app desktop."""
+    app_support_dir: str
+    directories: Dict[str, RuntimeDirectoryStatus]
+    models: List[RuntimeModelStatus]
+    job_counts: Dict[str, int]
+    jobs: List[RuntimeJobStatus]
+    ano_referencia: int
+    simulado_id: Optional[str] = None
+    status_areas: Dict[str, str] = Field(default_factory=dict)

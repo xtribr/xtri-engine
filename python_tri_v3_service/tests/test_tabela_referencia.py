@@ -21,6 +21,33 @@ class TestTabelaReferenciaTRI:
         assert set(range(45)) == set(tabela.lookup["LC"].keys()), "LC missing keys"
 
     @pytest.mark.unit
+    def test_lc_multiano_is_contiguous_and_bounded(self):
+        """LC per-year tables vary in exact range (2016=0..43, 2024=0..45)
+        because of differing data availability, but three invariants MUST
+        hold across every year:
+
+          1. Keys start at 0 (no gap at the bottom)
+          2. Keys are contiguous (set equal to range(0, max+1))
+          3. max(keys) in [42, 45] — any value outside that window is a data
+             ingest bug (e.g. a 46-item LC would be impossible per ENEM design)
+
+        Any future shift outside these bounds is a red flag for the data
+        pipeline and should block the release.
+        """
+        multiano = TabelaReferenciaTRI.carregar_multiano()
+        assert multiano, "Multi-year tables not loaded"
+        for ano, t in multiano.items():
+            lc_keys = set(t.lookup["LC"].keys())
+            lc_max = max(lc_keys)
+            assert 0 in lc_keys, f"LC {ano}: missing 0 acertos key"
+            assert lc_keys == set(range(lc_max + 1)), (
+                f"LC {ano}: non-contiguous keys {sorted(lc_keys)}"
+            )
+            assert 42 <= lc_max <= 45, (
+                f"LC {ano}: max acertos {lc_max} outside expected [42, 45]"
+            )
+
+    @pytest.mark.unit
     def test_mediana_monotonicamente_crescente(self, tabela: TabelaReferenciaTRI):
         for area in tabela.areas:
             acertos_ordenados = sorted(tabela.lookup[area].keys())

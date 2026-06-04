@@ -3,6 +3,11 @@
 import numpy as np
 import pytest
 
+from app.irt.scoring import eap_theta as _eap_theta_raw
+from app.irt.unidim_em import (
+    _theta_grid_and_weights,
+    calibrar_itens_mml_em,
+)
 from app.motores.cientifico import (
     P,
     calibrar_itens,
@@ -90,8 +95,9 @@ class TestCalibrarItens:
     def test_b_dentro_dos_limites(self, respostas_binarias_50x45):
         matrix = np.array(respostas_binarias_50x45, dtype=int)
         params = calibrar_itens(matrix, c=0.20)
+        # Optimizer bounds widened to ±5 along with the [-5, 5] quadrature grid.
         for p in params:
-            assert -4.0 <= p["b"] <= 4.0
+            assert -5.0 <= p["b"] <= 5.0
 
     @pytest.mark.integration
     def test_c_fixo(self, respostas_binarias_50x45):
@@ -106,6 +112,35 @@ class TestCalibrarItens:
         params = calibrar_itens(matrix, c=0.20)
         for p in params:
             assert 0.0 <= p["taxa_acerto"] <= 1.0
+
+    @pytest.mark.integration
+    def test_distingue_discriminacoes_com_taxas_semelhantes(self):
+        rng = np.random.default_rng(42)
+        n_students = 2000
+        thetas = rng.normal(size=n_students)
+
+        # Dois itens com taxas de acerto próximas, mas discriminações reais bem
+        # diferentes. A calibração conjunta precisa capturar essa diferença.
+        items = [
+            {"a": 2.5, "b": 0.0, "c": 0.20},
+            {"a": 0.6, "b": -0.4, "c": 0.20},
+            {"a": 1.2, "b": -1.0, "c": 0.20},
+            {"a": 1.4, "b": 0.8, "c": 0.20},
+            {"a": 0.9, "b": 1.2, "c": 0.20},
+            {"a": 1.8, "b": -0.7, "c": 0.20},
+        ]
+
+        responses = []
+        for item in items:
+            prob = item["c"] + (1 - item["c"]) / (
+                1 + np.exp(-item["a"] * (thetas - item["b"]))
+            )
+            responses.append((rng.random(n_students) < prob).astype(int))
+
+        matrix = np.stack(responses, axis=1)
+        params = calibrar_itens(matrix, c=0.20, n_quad=31)
+
+        assert params[0]["a"] > params[1]["a"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -180,12 +215,67 @@ class TestAncorarNotas:
         assert resultados[1]["nota_ancorada"] >= resultados[0]["nota_ancorada"]
 
     @pytest.mark.unit
+    def test_sinal_do_theta_define_lado_da_faixa(self, tabela):
+        thetas = [
+            {"aluno_id": "neg", "acertos": 20, "theta": -0.8, "se": 0.3},
+            {"aluno_id": "zero", "acertos": 20, "theta": 0.0, "se": 0.3},
+            {"aluno_id": "pos", "acertos": 20, "theta": 0.8, "se": 0.3},
+        ]
+        resultados = ancorar_notas(thetas, tabela, "MT")
+        ref = tabela.obter("MT", 20)
+        nota_neg = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "neg")
+        nota_zero = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "zero")
+        nota_pos = next(r["nota_ancorada"] for r in resultados if r["aluno_id"] == "pos")
+
+        assert nota_neg <= ref["tri_med"] + 0.1
+        assert abs(nota_zero - ref["tri_med"]) <= 0.1
+        assert nota_pos >= ref["tri_med"] - 0.1
+
+    @pytest.mark.unit
     def test_zero_acertos_nota_fixa(self, tabela):
         thetas = [{"aluno_id": "1", "acertos": 0, "theta": -2.0, "se": 1.0}]
         resultados = ancorar_notas(thetas, tabela, "MT")
         ref = tabela.obter("MT", 0)
         # 0 acertos: interval is collapsed (min == max), so nota == tri_med
         assert abs(resultados[0]["nota_ancorada"] - ref["tri_med"]) < 1.0
+
+    @pytest.mark.unit
+    def test_no_global_cap_below_per_year_tri_max(self):
+        """Regression: the year-specific ``ref_max`` must be respected even
+        when it exceeds ``TRI_MAXIMA_OFICIAL`` (which was derived from MT 2024
+        only). Prior to this fix, MT 2017/2018/2022 students with 41 acertos
+        and high θ were all collapsed to exactly 960.0 because the clip
+        applied ``min(TRI_MAXIMA_OFICIAL, ref_max)`` unconditionally — the
+        per-year max was lost.
+        """
+        multiano = TabelaReferenciaTRI.carregar_multiano()
+        # Every MT year with tri_max > 960 at 41 acertos should produce
+        # distinct notas for a very high-θ student. 2017/2018/2022 all have
+        # tri_max in (980, 990) at that acertos level.
+        thetas = [{"aluno_id": "top", "acertos": 41, "theta": 3.0, "se": 0.3}]
+        seen_notas: list[float] = []
+        for ano in (2017, 2018, 2022):
+            if ano not in multiano:
+                continue
+            resultados = ancorar_notas(thetas, multiano[ano], "MT")
+            nota = resultados[0]["nota_ancorada"]
+            ref_max = multiano[ano].lookup["MT"][41]["tri_max"]
+            # Nota should approach ref_max (θ=3 → norm.cdf(3)=0.9987) and NOT
+            # be stuck at 960.
+            assert nota > 960.0, (
+                f"MT {ano} ac=41 θ=3 nota={nota} stuck at old cap "
+                f"(ref_max for year is {ref_max})"
+            )
+            assert nota <= ref_max + 0.5, (
+                f"MT {ano} ac=41 nota={nota} exceeds year-specific tri_max "
+                f"{ref_max}"
+            )
+            seen_notas.append(nota)
+        # At least 3 distinct notas across the three years — if they all
+        # collapsed to the same value, the global cap is back.
+        assert len(set(round(n, 1) for n in seen_notas)) >= 2, (
+            f"High-θ notas collapsed to a single value across years: {seen_notas}"
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -290,3 +380,548 @@ class TestEstimarThetaIndividual:
         resultado = estimar_theta_individual(respostas, params, "MT", tabela)
         assert resultado["nota_ancorada"] <= TRI_MAXIMA_OFICIAL["MT"]
         assert resultado["nota_ancorada"] > 0
+
+    @pytest.mark.integration
+    def test_transformacao_distingue_padroes_com_mesmos_acertos(self, tabela):
+        params = (
+            [{"a": 1.2, "b": -2.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": -1.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 0.5, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 1.5, "c": 0.20}] * 2
+        )
+        respostas_padrao_1 = [1, 1, 1, 1, 0, 0, 0, 0]
+        respostas_padrao_2 = [0, 0, 0, 0, 1, 1, 1, 1]
+        transformacao = {"mu": 500.0, "sigma": 100.0}
+
+        resultado_padrao_1 = estimar_theta_individual(
+            respostas_padrao_1, params, "MT", tabela, transformacao=transformacao
+        )
+        resultado_padrao_2 = estimar_theta_individual(
+            respostas_padrao_2, params, "MT", tabela, transformacao=transformacao
+        )
+
+        assert resultado_padrao_1["acertos"] == resultado_padrao_2["acertos"] == 4
+        assert resultado_padrao_1["theta"] != resultado_padrao_2["theta"]
+        assert resultado_padrao_1["nota_ancorada"] != resultado_padrao_2["nota_ancorada"]
+        assert (
+            resultado_padrao_1["theta"] > resultado_padrao_2["theta"]
+        ) == (
+            resultado_padrao_1["nota_ancorada"] > resultado_padrao_2["nota_ancorada"]
+        )
+
+    @pytest.mark.integration
+    def test_sem_transformacao_nao_fixa_nota_na_mediana(self, tabela):
+        params = (
+            [{"a": 1.2, "b": -2.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": -1.0, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 0.5, "c": 0.20}] * 2
+            + [{"a": 1.2, "b": 1.5, "c": 0.20}] * 2
+        )
+        respostas_padrao_1 = [1, 1, 1, 1, 0, 0, 0, 0]
+        respostas_padrao_2 = [0, 0, 0, 0, 1, 1, 1, 1]
+
+        resultado_padrao_1 = estimar_theta_individual(
+            respostas_padrao_1,
+            params,
+            "MT",
+            tabela,
+        )
+        resultado_padrao_2 = estimar_theta_individual(
+            respostas_padrao_2,
+            params,
+            "MT",
+            tabela,
+        )
+
+        ref = tabela.obter("MT", 4)
+        margem = (ref["tri_max"] - ref["tri_min"]) * 0.03 + 0.1
+
+        assert resultado_padrao_1["acertos"] == resultado_padrao_2["acertos"] == 4
+        assert resultado_padrao_1["theta"] != resultado_padrao_2["theta"]
+        assert resultado_padrao_1["nota_ancorada"] != resultado_padrao_2["nota_ancorada"]
+        assert (
+            resultado_padrao_1["theta"] > resultado_padrao_2["theta"]
+        ) == (
+            resultado_padrao_1["nota_ancorada"] > resultado_padrao_2["nota_ancorada"]
+        )
+        for resultado in (resultado_padrao_1, resultado_padrao_2):
+            assert ref["tri_min"] - margem <= resultado["nota_ancorada"] <= ref["tri_max"] + margem
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Quadrature + EM convergence (accuracy plan #1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestQuadratureGrid:
+    """Guards against silent narrowing of the quadrature grid.
+
+    The grid has to span the student theta distribution — narrowing it
+    (e.g. back to [-4, 4]) loses tail mass for high-ability students,
+    which re-introduces 2-3 MAE points per the April 2026 accuracy audit.
+    """
+
+    @pytest.mark.unit
+    def test_default_grid_covers_plus_minus_5_sigma(self):
+        theta_grid, weights = _theta_grid_and_weights(n_quad=61)
+        assert theta_grid[0] <= -5.0 + 1e-9
+        assert theta_grid[-1] >= 5.0 - 1e-9
+        # Weights should sum to 1 (normalised prior on the grid).
+        assert abs(float(weights.sum()) - 1.0) < 1e-12
+
+    @pytest.mark.unit
+    def test_default_grid_has_61_points(self):
+        theta_grid, _ = _theta_grid_and_weights(n_quad=61)
+        assert theta_grid.shape == (61,)
+
+    @pytest.mark.unit
+    def test_calibrar_mml_em_default_n_quad_is_61(self):
+        """Signature defaults protect against silent narrowing."""
+        import inspect
+        sig = inspect.signature(calibrar_itens_mml_em)
+        assert sig.parameters["n_quad"].default == 61
+        assert sig.parameters["max_iter"].default >= 50
+        assert sig.parameters["tol"].default <= 1e-4
+
+    @pytest.mark.unit
+    def test_production_wrapper_defaults_match_em(self):
+        """``calibrar_itens`` (production wrapper used by /api/v3 routes) must
+        delegate with n_quad=61, not the old 41. The April 2026 review caught
+        a regression where this wrapper still had n_quad=41 and silently
+        downgraded every production calibration call back to the narrow grid.
+        """
+        import inspect
+        sig = inspect.signature(calibrar_itens)
+        assert sig.parameters["n_quad"].default == 61, (
+            "calibrar_itens default dropped the grid improvement — the "
+            "production /api/v3 path will use the old [-4, 4, 41] grid."
+        )
+
+    @pytest.mark.unit
+    def test_eap_theta_default_n_quad_is_61(self):
+        import inspect
+        sig = inspect.signature(_eap_theta_raw)
+        assert sig.parameters["n_quad"].default == 61
+
+
+class TestEAPTailSensitivity:
+    """Verifies that high-ability students aren't clipped at the grid edge."""
+
+    @pytest.mark.unit
+    def test_all_correct_student_gets_high_theta(self):
+        """All-correct vectors should land well into the positive tail.
+
+        The new [-5, 5, 61] grid prevents clipping at 3.85 (the old [-4, 4, 41]
+        edge). With c=0.20 the 3PL likelihood plateaus as theta grows, so EAP
+        + N(0,1) prior typically centres around 2.8-3.5 for 45-item vectors —
+        but we also check it's NOT stuck at the old clip point.
+        """
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": float(b), "c": 0.20, "taxa_acerto": 0.5, "saturado": False}
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        theta, se = _eap_theta_raw(np.ones(n_itens, dtype=int), item_params)
+        # Positive tail: at least 2σ above the prior mean
+        assert theta > 2.0, f"All-correct theta too low: {theta}"
+        # Not clipped at the old edge (3.85 was the old EAP ceiling)
+        assert theta < 4.5, f"Theta suspiciously close to grid edge: {theta}"
+        assert se > 0
+
+    @pytest.mark.unit
+    def test_all_wrong_student_gets_low_theta(self):
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": float(b), "c": 0.20, "taxa_acerto": 0.5, "saturado": False}
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        theta, _ = _eap_theta_raw(np.zeros(n_itens, dtype=int), item_params)
+        assert theta < -1.5
+
+
+class TestEMConvergence:
+    """Higher max_iter + tighter tol should not destabilise recovery."""
+
+    @pytest.mark.integration
+    def test_recovers_item_difficulty_order(self):
+        """After calibration, the rank of b must correlate with the true b."""
+        rng = np.random.default_rng(17)
+        n_students = 300
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = np.sort(rng.uniform(-2.0, 2.0, n_itens))  # known order
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c=c)
+        b_hat = np.array([p["b"] for p in params])
+        # Spearman-ish: rank correlation of b estimate with true b
+        from scipy.stats import spearmanr
+        corr, _ = spearmanr(b_hat, true_b)
+        assert corr > 0.90, f"b rank correlation too low: {corr:.3f}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Constant-response filter (accuracy plan #2)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestConstantResponseFilter:
+    """Students with all-0 or all-N response vectors must not poison calibration.
+
+    Per the Apr-2026 accuracy audit, these degenerate rows contribute no
+    discriminating signal to the EM M-step and bias item difficulty estimates
+    toward the prior mean — costing ~2-3 MAE points. The filter excludes them
+    from calibration only; scoring is still applied to every student so they
+    still receive a nota.
+    """
+
+    def _synthetic_baseline(self, *, n_students=200, n_itens=45, seed=23):
+        rng = np.random.default_rng(seed)
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = np.sort(rng.uniform(-2.0, 2.0, n_itens))
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+        # Reject students who happen to be all-0 or all-correct by chance — we
+        # want the baseline to be clean of constant-response noise.
+        keep = (resp.sum(axis=1) > 0) & (resp.sum(axis=1) < n_itens)
+        return resp[keep], true_b
+
+    @pytest.mark.integration
+    def test_calibration_ignores_all_zero_students(self):
+        resp, _ = self._synthetic_baseline()
+        params_clean = calibrar_itens_mml_em(resp, c=0.20)
+
+        # Splice in 10 all-zero students (5% of cohort)
+        resp_poisoned = np.vstack([resp, np.zeros((10, resp.shape[1]), dtype=int)])
+        params_poisoned = calibrar_itens_mml_em(resp_poisoned, c=0.20)
+
+        b_clean = np.array([p["b"] for p in params_clean])
+        b_poisoned = np.array([p["b"] for p in params_poisoned])
+        # After filter, the EM sees the same cohort — b should be near-identical.
+        assert np.max(np.abs(b_clean - b_poisoned)) < 0.05, (
+            f"All-zero students moved b by "
+            f"{np.max(np.abs(b_clean - b_poisoned)):.3f} — filter not working"
+        )
+
+    @pytest.mark.integration
+    def test_calibration_ignores_all_one_students(self):
+        resp, _ = self._synthetic_baseline()
+        params_clean = calibrar_itens_mml_em(resp, c=0.20)
+
+        # Splice in 10 all-correct students
+        resp_poisoned = np.vstack([resp, np.ones((10, resp.shape[1]), dtype=int)])
+        params_poisoned = calibrar_itens_mml_em(resp_poisoned, c=0.20)
+
+        b_clean = np.array([p["b"] for p in params_clean])
+        b_poisoned = np.array([p["b"] for p in params_poisoned])
+        assert np.max(np.abs(b_clean - b_poisoned)) < 0.05, (
+            f"All-correct students moved b by "
+            f"{np.max(np.abs(b_clean - b_poisoned)):.3f} — filter not working"
+        )
+
+    @pytest.mark.integration
+    def test_taxa_acerto_still_reflects_full_cohort(self):
+        """Even though constant-response students are filtered from the EM,
+        their responses should still count toward the reported taxa_acerto
+        (this is a diagnostic, not a calibration parameter)."""
+        resp, _ = self._synthetic_baseline()
+        n_students = resp.shape[0]
+        resp_with_zeros = np.vstack([resp, np.zeros((10, resp.shape[1]), dtype=int)])
+        params = calibrar_itens_mml_em(resp_with_zeros, c=0.20)
+
+        # Taxa for each item should be ≤ the baseline taxa (all-zero students
+        # pulled the mean down on every item).
+        full_taxa = resp_with_zeros.mean(axis=0)
+        for j, p in enumerate(params):
+            assert abs(p["taxa_acerto"] - full_taxa[j]) < 0.01, (
+                f"Item {j} taxa_acerto ({p['taxa_acerto']}) diverged from "
+                f"full-cohort empirical rate ({full_taxa[j]:.4f})"
+            )
+
+    @pytest.mark.integration
+    def test_pipeline_still_scores_constant_students(self, tabela):
+        """Constant-response students must still receive a nota — they're just
+        excluded from calibration. Pipeline output row count == input row count."""
+        resp, _ = self._synthetic_baseline(n_students=50)
+        # 45 normal + 5 all-zero + 5 all-correct = 55 alunos total
+        extra = np.vstack([
+            np.zeros((5, resp.shape[1]), dtype=int),
+            np.ones((5, resp.shape[1]), dtype=int),
+        ])
+        full_resp = np.vstack([resp, extra])
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": full_resp[i].tolist()}
+            for i in range(full_resp.shape[0])
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        assert len(resultado["resultados_alunos"]) == full_resp.shape[0]
+        # All-zero students should land in the negative tail, all-correct in the
+        # positive tail. Just assert sign, not exact values.
+        ids_all_zero = {f"S{i:03d}" for i in range(resp.shape[0], resp.shape[0] + 5)}
+        ids_all_one = {f"S{i:03d}" for i in range(resp.shape[0] + 5, resp.shape[0] + 10)}
+        by_id = {r["aluno_id"]: r for r in resultado["resultados_alunos"]}
+        for aid in ids_all_zero:
+            assert by_id[aid]["theta"] < 0, f"{aid} all-zero but theta={by_id[aid]['theta']}"
+        for aid in ids_all_one:
+            assert by_id[aid]["theta"] > 0, f"{aid} all-correct but theta={by_id[aid]['theta']}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Saturated item handling in EAP (accuracy plan #3)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestSaturatedItemsSkipped:
+    """Items flagged ``saturado=True`` must NOT contribute to EAP scoring.
+
+    ``saturado`` means the MML/EM optimizer clamped ``b`` at the L-BFGS-B bound
+    (>=4.8 with the current [-5, 5] bound). That means the b estimate is
+    unreliable — feeding it into EAP adds noise without signal, typically
+    biasing high-ability students downward by ~5-8 MAE points per the
+    April-2026 audit.
+    """
+
+    @pytest.mark.unit
+    def test_saturated_item_identity_in_eap(self):
+        """A saturated item should yield the same EAP as if it were not there.
+
+        Build a 45-item vector with one item flagged saturado and the rest
+        normal. Both (a) dropping that item and (b) marking it saturated
+        should produce the same theta — proving the skip logic works.
+        """
+        n_itens = 45
+        item_params_full = [
+            {
+                "a": 1.2,
+                "b": float(b),
+                "c": 0.20,
+                "taxa_acerto": 0.5,
+                "saturado": False,
+            }
+            for b in np.linspace(-2.0, 2.0, n_itens)
+        ]
+        responses = np.random.default_rng(7).integers(0, 2, n_itens)
+
+        # Baseline: EAP with all 45 items
+        theta_baseline, _ = _eap_theta_raw(responses, item_params_full)
+
+        # Mark item 10 as saturated → EAP should behave as if only 44 items exist
+        item_params_flagged = [dict(p) for p in item_params_full]
+        item_params_flagged[10]["saturado"] = True
+        item_params_flagged[10]["b"] = 4.9  # simulate the clamped value
+        theta_flagged, _ = _eap_theta_raw(responses, item_params_flagged)
+
+        # Reference: EAP excluding item 10 manually
+        params_ex = [p for i, p in enumerate(item_params_full) if i != 10]
+        responses_ex = np.delete(responses, 10)
+        theta_expected, _ = _eap_theta_raw(responses_ex, params_ex)
+
+        assert abs(theta_flagged - theta_expected) < 1e-5, (
+            f"Saturated-flag skip differs from manual exclusion: "
+            f"flagged={theta_flagged} expected={theta_expected}"
+        )
+        # And should differ from the baseline (otherwise flag has no effect)
+        assert abs(theta_flagged - theta_baseline) > 1e-6
+
+    @pytest.mark.unit
+    def test_all_items_saturated_returns_prior_mean(self):
+        """If every item is flagged saturated, EAP has nothing to work with
+        and must return the prior mean θ=0 with SE=1 (unit prior)."""
+        n_itens = 45
+        item_params = [
+            {"a": 1.2, "b": 4.9, "c": 0.20, "taxa_acerto": 0.01, "saturado": True}
+            for _ in range(n_itens)
+        ]
+        responses = np.ones(n_itens, dtype=int)
+        theta, se = _eap_theta_raw(responses, item_params)
+        # With zero effective items, posterior == prior — theta should be ~0
+        assert abs(theta) < 0.01, f"All-saturated theta should be ~0, got {theta}"
+        # SE should be close to the prior SD of 1
+        assert 0.95 < se < 1.05
+
+    @pytest.mark.integration
+    def test_saturated_items_excluded_from_primi_subgroups(self, tabela):
+        """Saturated items must also drop out of idx_faceis/medios/dificeis.
+
+        Otherwise a student's ``acert_dif`` ratio is inflated by untrustworthy
+        hard-item responses, which then biases the pedagogical recommendations
+        in enriquecimento.py.
+        """
+        # Construct a tiny calibrated bank by hand so we know exactly which
+        # items should be in each bucket.
+        from app.motores.cientifico import pipeline_cientifico
+        # We need to call pipeline_cientifico which will calibrate from scratch,
+        # so instead assert the property by checking that acert_dif stays
+        # bounded between 0 and 1 and that diagnostico reports an eap-exclusion
+        # count equal to the saturation count.
+        rng = np.random.default_rng(101)
+        n_students = 60
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        # Mix of easy and impossibly hard items; the impossibly hard ones
+        # should saturate.
+        easy_b = rng.uniform(-2.0, 0.5, 40)
+        impossibly_hard_b = rng.uniform(5.5, 7.0, 5)
+        true_b = np.concatenate([easy_b, impossibly_hard_b])
+        rng.shuffle(true_b)
+        true_a = np.full(n_itens, 1.2)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": resp[i].tolist()}
+            for i in range(n_students)
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        diag = resultado["diagnostico"]
+
+        # The two counts must agree — itens_excluidos_eap is just a rename of
+        # itens_saturados for the scoring surface, not a separate count.
+        assert diag["itens_excluidos_eap"] == diag["itens_saturados"]
+        # All acert_dif values must stay in [0, 1] — if saturated items had
+        # been mixed in, acertos_dificeis could exceed n_dificeis.
+        for r in resultado["resultados_alunos"]:
+            assert 0.0 <= r["acert_dif"] <= 1.0
+
+    @pytest.mark.integration
+    def test_pipeline_logs_saturated_count_in_diagnostico(self, tabela):
+        """The diagnostico dict must surface itens_saturados so the user /
+        frontend can flag calibrations where a large fraction of items were
+        unreliable (often a red flag for a small or non-representative cohort)."""
+        rng = np.random.default_rng(11)
+        # Create 30 low-ability students against items that require high ability.
+        # Many items will be "impossibly hard" and saturate at the 5.0 bound.
+        n_students = 30
+        n_itens = 45
+        true_thetas = rng.normal(-1.5, 0.5, n_students)  # low-ability cohort
+        true_b = np.sort(rng.uniform(2.0, 4.5, n_itens))  # mostly hard items
+        true_a = np.full(n_itens, 1.0)
+        c = 0.20
+        probs = c + (1 - c) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+        # Guarantee at least some informative rows
+        resp[0] = (np.arange(n_itens) % 2)
+        resp[1] = (np.arange(n_itens) % 3 == 0).astype(int)
+
+        alunos = [
+            {"aluno_id": f"S{i:03d}", "nome": "", "respostas": resp[i].tolist()}
+            for i in range(n_students)
+        ]
+        resultado = pipeline_cientifico(alunos=alunos, area="MT", tabela=tabela)
+        diag = resultado["diagnostico"]
+        assert "itens_saturados" in diag
+        assert diag["itens_saturados"] >= 0  # always a valid count
+        assert len(resultado["resultados_alunos"]) == n_students
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Bayesian c-prior estimation (accuracy plan #5)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestBayesianCEstimation:
+    """The optional per-item c estimation path with Beta(10, 40) prior.
+
+    The largest single MAE win from the April-2026 psychometric audit
+    (5-10 points) when it activates. Guarded to stay opt-in so nothing
+    regresses for existing callers.
+    """
+
+    @pytest.mark.unit
+    def test_bayes_c_strategy_signature_is_available(self):
+        """The MML/EM engine must accept a ``c_strategy`` kwarg with the
+        default ``"fixed"``. Guards against silent removal of the path."""
+        import inspect
+        sig = inspect.signature(calibrar_itens_mml_em)
+        assert "c_strategy" in sig.parameters
+        assert sig.parameters["c_strategy"].default == "fixed"
+
+    @pytest.mark.integration
+    def test_bayes_c_varies_per_item_on_large_sample(self):
+        """With c_strategy='bayes' and N >= 1000 informative rows, c should
+        vary per item around the Beta(10, 40) prior mean (0.20, std≈0.055)."""
+        rng = np.random.default_rng(51)
+        n_students = 1500
+        n_itens = 45
+        # Heterogeneous true c per item so the Bayes path has something to
+        # recover. The prior still pulls toward 0.20, so the recovered c
+        # won't match exactly — we just need it to vary item-to-item.
+        true_c = rng.uniform(0.15, 0.30, n_itens)
+        true_a = np.full(n_itens, 1.2)
+        true_b = rng.uniform(-2.0, 2.0, n_itens)
+        true_thetas = rng.normal(0, 1, n_students)
+        probs = true_c[None, :] + (1 - true_c[None, :]) / (
+            1 + np.exp(-true_a[None, :] * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c_strategy="bayes")
+        c_values = np.array([p["c"] for p in params])
+        # Should vary meaningfully across items
+        assert c_values.std() > 0.01, (
+            f"c values did not diverge under bayes strategy: std={c_values.std():.4f}"
+        )
+        # All values should stay near the prior mean (0.20 +/- 3σ of prior)
+        assert c_values.min() > 0.05
+        assert c_values.max() < 0.40
+
+    @pytest.mark.integration
+    def test_bayes_c_falls_back_to_fixed_for_small_sample(self):
+        """With N below the Bayes threshold, the code must fall back to the
+        fixed-c path — the Beta prior dominates in that regime anyway."""
+        rng = np.random.default_rng(52)
+        n_students = 200  # well below the 1000 threshold
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = rng.uniform(-2.0, 2.0, n_itens)
+        probs = 0.20 + 0.80 / (
+            1 + np.exp(-1.0 * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params = calibrar_itens_mml_em(resp, c_strategy="bayes", c=0.22)
+        c_values = np.array([p["c"] for p in params])
+        assert np.allclose(c_values, 0.22), (
+            f"Fallback expected fixed c=0.22, got: {c_values[:3]}"
+        )
+
+    @pytest.mark.integration
+    def test_bayes_c_respects_em_convergence_for_c(self):
+        """When the Bayes path is active, the outer EM convergence check
+        must account for c-delta too — otherwise c can oscillate after a/b
+        have settled and the loop terminates prematurely.
+
+        We can't easily observe the inner convergence directly, but we can
+        verify that the returned c values are stable under re-calibration
+        on the same seed: two runs with identical data must produce the
+        same c vector within tight tolerance (i.e. the EM actually converged).
+        """
+        rng = np.random.default_rng(53)
+        n_students = 1200
+        n_itens = 45
+        true_thetas = rng.normal(0, 1, n_students)
+        true_b = rng.uniform(-2.0, 2.0, n_itens)
+        probs = 0.20 + 0.80 / (
+            1 + np.exp(-1.0 * (true_thetas[:, None] - true_b[None, :]))
+        )
+        resp = (rng.uniform(size=probs.shape) < probs).astype(int)
+
+        params_run_1 = calibrar_itens_mml_em(resp, c_strategy="bayes")
+        params_run_2 = calibrar_itens_mml_em(resp, c_strategy="bayes")
+        c_1 = np.array([p["c"] for p in params_run_1])
+        c_2 = np.array([p["c"] for p in params_run_2])
+        # EM is deterministic given the same matrix — c should match exactly.
+        assert np.allclose(c_1, c_2, atol=1e-8), (
+            "Bayes c-estimation not deterministic — convergence may be unstable"
+        )

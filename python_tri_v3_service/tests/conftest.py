@@ -2,12 +2,54 @@
 Shared fixtures for XTRI Engine API tests.
 """
 
+from unittest import mock
+
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.tabela_referencia import TabelaReferenciaTRI
+
+
+@pytest.fixture(scope="session", autouse=True)
+def temp_model_storage(tmp_path_factory):
+    """Redireciona storage local para um diretório temporário durante os testes."""
+
+    temp_root = tmp_path_factory.mktemp("xtri_app_support")
+    with mock.patch("app.runtime.local_paths.APP_SUPPORT_ROOT", temp_root), mock.patch(
+        "app.runtime.local_paths.MODELS_ROOT", temp_root / "models"
+    ), mock.patch(
+        "app.runtime.local_paths.UNIDIM_MODELS_ROOT", temp_root / "models" / "unidim"
+    ), mock.patch(
+        "app.runtime.local_paths.MIRT_MODELS_ROOT", temp_root / "models" / "mirt"
+    ), mock.patch(
+        "app.runtime.local_paths.MICRODATA_CACHE_ROOT", temp_root / "cache" / "microdata"
+    ), mock.patch(
+        "app.runtime.local_paths.JOBS_ROOT", temp_root / "jobs"
+    ), mock.patch(
+        "app.runtime.local_paths.LOGS_ROOT", temp_root / "logs"
+    ), mock.patch(
+        "app.runtime.local_paths.LEGACY_MICRODATA_CACHE_ROOT", temp_root / "microdata_cache"
+    ), mock.patch("app.storage.artifacts.APP_SUPPORT_ROOT", temp_root), mock.patch(
+        "app.storage.artifacts.MODELS_ROOT", temp_root / "models"
+    ), mock.patch(
+        "app.storage.artifacts.UNIDIM_MODELS_ROOT", temp_root / "models" / "unidim"
+    ), mock.patch(
+        "app.mirt.runner.MIRT_MODELS_ROOT", temp_root / "models" / "mirt"
+    ), mock.patch(
+        "app.runtime.mirt.MIRT_MODELS_ROOT", temp_root / "models" / "mirt"
+    ), mock.patch(
+        "app.storage.model_registry.APP_SUPPORT_ROOT", temp_root
+    ), mock.patch(
+        "app.storage.model_registry.MODEL_REGISTRY_PATH",
+        temp_root / "models" / "active_models.json",
+    ), mock.patch(
+        "app.microdata.cache.CACHE_ROOT", temp_root / "cache" / "microdata"
+    ), mock.patch(
+        "app.microdata.cache.LEGACY_CACHE_ROOT", temp_root / "microdata_cache"
+    ):
+        yield temp_root
 
 
 @pytest.fixture(scope="session")
