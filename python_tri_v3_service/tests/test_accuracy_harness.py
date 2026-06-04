@@ -289,3 +289,45 @@ def test_benchmark_cache_path_uses_corrected_dir():
 
     p = default_csv_path(2024)
     assert "apps/apps" not in str(p)
+
+
+@pytest.mark.unit
+def test_load_fredao_matrix_synthetic(tmp_path):
+    import pandas as pd
+    from app.evaluation.fredao_recovery import load_fredao_matrix
+
+    cols = {"ID": [f"S{i}" for i in range(10)]}
+    rng = np.random.default_rng(7)
+    for pos in range(91, 136):  # 45 itens CN em ordem de posição
+        cols[pos] = rng.integers(0, 2, size=10)
+    df = pd.DataFrame(cols)
+    p = tmp_path / "fredao.xlsx"
+    df.to_excel(p, index=False)
+
+    mat = load_fredao_matrix(p)
+    assert mat.shape == (10, 45)
+    assert set(np.unique(mat)).issubset({0, 1})
+
+
+@pytest.mark.integration
+def test_fredao_recovery_real_data_reports_alignment():
+    """O pipeline Fredão roda e reporta sanidade de alinhamento honestamente.
+
+    Cada área deve trazer `sanity_corr_acerto_b` (float) e `aligned` (bool); e a
+    recuperação só é preenchida quando alinhado (senão None) — nunca números
+    enganosos sob desalinhamento.
+    """
+    from app.evaluation.fredao_recovery import FREDAO_DIR, run_fredao_recovery
+
+    if not FREDAO_DIR.is_dir():
+        pytest.skip(f"Simulado Fredão não encontrado em {FREDAO_DIR}")
+    rec = run_fredao_recovery(2017)
+    if not rec:
+        pytest.skip("Nenhum arquivo Fredão CN/MT presente")
+    for area, entry in rec.items():
+        assert "sanity_corr_acerto_b" in entry
+        assert isinstance(entry["aligned"], bool)
+        # invariante de honestidade: recuperação preenchida sse alinhado
+        assert (entry["2017"] is not None) == entry["aligned"]
+        if entry["aligned"]:
+            assert entry["2017"]["stocking_lord"]["b"]["r"] > 0.5
