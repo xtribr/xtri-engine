@@ -187,7 +187,11 @@ class TestRealINEPBenchmark:
     def calibrated_df(self):
         path = _calibrated_cache_path(2024)
         if path is None:
-            pytest.skip("2024 calibrated parquet cache not present")
+            pytest.skip(
+                "Cache 2024 calibrado ausente. Gere com: "
+                "`python -m app.evaluation --year 2024` (ou o pipeline V5 'prepare'). "
+                "Sem ele, o guardrail de acuracia real NAO roda."
+            )
         return pd.read_parquet(path)
 
     @pytest.mark.integration

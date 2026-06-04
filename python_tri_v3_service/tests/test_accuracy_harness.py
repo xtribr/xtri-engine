@@ -281,3 +281,11 @@ def test_run_recovery_for_group_end_to_end():
     rec = run_recovery_for_group(resp, gabarito, official_items)
     assert set(rec.keys()) == {"mean_sigma", "stocking_lord"}
     assert rec["stocking_lord"]["b"]["r"] > 0.9
+
+
+@pytest.mark.unit
+def test_benchmark_cache_path_uses_corrected_dir():
+    from app.microdata.loader import default_csv_path
+
+    p = default_csv_path(2024)
+    assert "apps/apps" not in str(p)
