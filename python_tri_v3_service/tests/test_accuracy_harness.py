@@ -101,3 +101,42 @@ def test_stocking_lord_recovers_known_transform():
     link = stocking_lord_linking(ours, official)
     assert link.A == pytest.approx(A_true, abs=0.05)
     assert link.B == pytest.approx(B_true, abs=0.05)
+
+
+@pytest.mark.unit
+def test_official_items_and_coprova():
+    from app.evaluation.ground_truth import (
+        load_official_params,
+        official_coprova,
+        official_items,
+    )
+
+    params = load_official_params()
+    assert official_coprova(params, 2024, "MT") == 1323
+    assert official_coprova(params, 2024, "CN") == 1333
+    items = official_items(params, 2024, "MT")
+    assert len(items) == 45
+    assert set(items[0].keys()) >= {"a", "b", "c", "posicao", "gabarito"}
+
+
+@pytest.mark.unit
+def test_align_official_to_gabarito_matches_and_skips_annulled():
+    from app.evaluation.ground_truth import align_official_to_gabarito
+
+    official = [
+        {"a": 1.0, "b": 0.0, "c": 0.2, "posicao": 91, "gabarito": "A"},
+        {"a": 1.2, "b": 0.5, "c": 0.2, "posicao": 92, "gabarito": "B"},
+        {"a": 0.9, "b": -0.3, "c": 0.2, "posicao": 93, "gabarito": "C"},
+    ]
+    valid_cols, aligned = align_official_to_gabarito(official, "AXC")
+    assert valid_cols == [0, 2]
+    assert [p["posicao"] for p in aligned] == [91, 93]
+
+
+@pytest.mark.unit
+def test_align_raises_on_gabarito_mismatch():
+    from app.evaluation.ground_truth import align_official_to_gabarito
+
+    official = [{"a": 1.0, "b": 0.0, "c": 0.2, "posicao": 91, "gabarito": "A"}]
+    with pytest.raises(ValueError, match="gabarito"):
+        align_official_to_gabarito(official, "B")
