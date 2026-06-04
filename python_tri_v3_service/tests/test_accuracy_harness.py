@@ -192,3 +192,31 @@ def test_kfold_oof_predictions_shape_and_range():
     assert oof.shape == (600,)
     assert np.all(~np.isnan(oof))
     assert np.all(oof >= 100.0) and np.all(oof <= 1000.0)
+
+
+@pytest.mark.unit
+def test_score_with_official_params_shapes():
+    from app.evaluation.attribution import score_with_params
+    from app.tabela_referencia import TabelaReferenciaTRI
+
+    rng = np.random.default_rng(4)
+    resp = (rng.uniform(size=(50, 45)) < 0.6).astype(int)
+    params = [{"a": 1.2, "b": 0.0, "c": 0.2, "saturado": False} for _ in range(45)]
+    tabela = TabelaReferenciaTRI()
+    notas = score_with_params(resp, params, "CN", tabela)
+    assert notas.shape == (50,)
+    assert np.all(notas >= 100.0) and np.all(notas <= 1000.0)
+
+
+@pytest.mark.unit
+def test_decompose_error_attributes_calibration():
+    from app.evaluation.attribution import decompose_error
+
+    ref = np.array([500.0, 600.0, 700.0])
+    our_pred = np.array([540.0, 560.0, 760.0])
+    official_pred = np.array([510.0, 590.0, 710.0])
+    out = decompose_error(our_pred, official_pred, ref)
+    assert out["mae_full"] == pytest.approx(np.mean([40, 40, 60]))
+    assert out["mae_anchor"] == pytest.approx(np.mean([10, 10, 10]))
+    assert out["calib_contrib_mean"] == pytest.approx(out["mae_full"] - out["mae_anchor"])
+    assert "calib_contrib_ci" in out
