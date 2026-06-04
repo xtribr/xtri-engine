@@ -140,3 +140,48 @@ def test_align_raises_on_gabarito_mismatch():
     official = [{"a": 1.0, "b": 0.0, "c": 0.2, "posicao": 91, "gabarito": "A"}]
     with pytest.raises(ValueError, match="gabarito"):
         align_official_to_gabarito(official, "B")
+
+
+@pytest.mark.unit
+def test_kfold_indices_partition_and_no_leak():
+    from app.evaluation.kfold import _kfold_indices
+
+    folds = _kfold_indices(100, k=5, seed=42)
+    assert len(folds) == 5
+    allidx = np.concatenate(folds)
+    assert sorted(allidx.tolist()) == list(range(100))
+
+
+@pytest.mark.unit
+def test_anchor_batch_matches_individual():
+    from app.evaluation.kfold import anchor_batch
+    from app.irt.transform import ancorar_nota_individual
+    from app.tabela_referencia import TabelaReferenciaTRI
+
+    tabela = TabelaReferenciaTRI()
+    theta = np.array([0.5, -0.2, 1.1])
+    acertos = np.array([30, 20, 38])
+    got = anchor_batch(theta, acertos, "MT", tabela)
+    expect = np.array([
+        ancorar_nota_individual(theta=0.5, area="MT", acertos=30, tabela=tabela, tolerancia_pct=0.0),
+        ancorar_nota_individual(theta=-0.2, area="MT", acertos=20, tabela=tabela, tolerancia_pct=0.0),
+        ancorar_nota_individual(theta=1.1, area="MT", acertos=38, tabela=tabela, tolerancia_pct=0.0),
+    ])
+    assert np.allclose(got, expect)
+
+
+@pytest.mark.unit
+def test_kfold_oof_predictions_shape_and_range():
+    from app.evaluation.kfold import kfold_oof_predictions
+    from app.tabela_referencia import TabelaReferenciaTRI
+
+    rng = np.random.default_rng(3)
+    theta_true = rng.normal(0, 1, size=600)
+    b = np.linspace(-2, 2, 45)
+    p = 0.2 + 0.8 / (1 + np.exp(-(1.3) * (theta_true[:, None] - b[None, :])))
+    resp = (rng.uniform(size=p.shape) < p).astype(int)
+    tabela = TabelaReferenciaTRI()
+    oof = kfold_oof_predictions(resp, "CN", tabela, k=5, seed=42)
+    assert oof.shape == (600,)
+    assert np.all(~np.isnan(oof))
+    assert np.all(oof >= 100.0) and np.all(oof <= 1000.0)
