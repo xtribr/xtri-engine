@@ -220,3 +220,43 @@ def test_decompose_error_attributes_calibration():
     assert out["mae_anchor"] == pytest.approx(np.mean([10, 10, 10]))
     assert out["calib_contrib_mean"] == pytest.approx(out["mae_full"] - out["mae_anchor"])
     assert "calib_contrib_ci" in out
+
+
+@pytest.mark.unit
+def test_build_and_render_report(tmp_path):
+    from app.evaluation.report import build_report, render_text_table, write_report
+
+    end_to_end = {
+        "LC": {"area": "LC", "n": 1000, "mae": 38.2, "rmse": 47.1, "r": 0.91,
+               "mae_ci": (37.0, 39.4)},
+        "MT": {"area": "MT", "n": 1000, "mae": 41.0, "rmse": 52.0, "r": 0.90,
+               "mae_ci": (39.5, 42.5)},
+    }
+    attribution = {
+        "MT": {"n": 1000, "mae_full": 41.0, "mae_anchor": 22.0,
+               "calib_contrib_mean": 19.0, "calib_contrib_ci": (17.0, 21.0)},
+    }
+    recovery = {
+        "MT": {
+            "2024": {
+                "mean_sigma": {"a": {"r": 0.85, "rmse": 0.3, "mean_diff": 0.0, "n": 45},
+                               "b": {"r": 0.93, "rmse": 0.25, "mean_diff": 0.0, "n": 45}},
+                "stocking_lord": {"a": {"r": 0.86, "rmse": 0.28, "mean_diff": 0.0, "n": 45},
+                                  "b": {"r": 0.94, "rmse": 0.22, "mean_diff": 0.0, "n": 45}},
+            }
+        }
+    }
+    report = build_report(year=2024, end_to_end=end_to_end,
+                          attribution=attribution, recovery=recovery)
+    assert report["year"] == 2024
+    assert report["end_to_end"]["MT"]["mae"] == 41.0
+
+    table = render_text_table(report)
+    assert "MT" in table and "MAE" in table
+
+    out = tmp_path / "report.json"
+    write_report(report, out)
+    assert out.is_file()
+    import json
+    loaded = json.loads(out.read_text())
+    assert loaded["year"] == 2024
