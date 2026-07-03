@@ -1,14 +1,16 @@
 """
 Motor Científico TRI — Baseado no calibrar_tri.py (MIRT/XTRI Skill).
 
-Implementa TRI 2PL real com:
-- Calibração MML (Marginal Maximum Likelihood) via L-BFGS-B
+Implementa TRI logística com c fixo (formalmente um 3PL de guessing fixo, NÃO
+um 2PL: a ICC é P = c + (1-c)·logística com c=0.20, cujo piso é 0.20 e não 0).
+- Calibração MML (Marginal Maximum Likelihood) via L-BFGS-B (estima a, b; c fixo)
 - Estimação EAP (Expected A Posteriori) com prior N(0,1)
 - Ancoragem percentil na tabela de referência oficial do ENEM
 
 Regras invioláveis:
 1. Calibração independente por simulado × área (NUNCA misturar)
-2. Parâmetro c fixo em 0.20 (5 alternativas) para N < 500
+2. Parâmetro c fixo em 0.20 (5 alternativas) para N < 500 — isto torna o modelo
+   um 3PL de c fixo; descrever como "2PL" nos rótulos/relatórios é incorreto.
 3. Ancoragem contínua: nota = ref_min_K + norm.cdf(θ) × (ref_max_K − ref_min_K)
 """
 
