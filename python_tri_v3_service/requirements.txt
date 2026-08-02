@@ -10,3 +10,4 @@ supabase>=2.4.0
 python-dotenv>=1.0.0
 anthropic>=0.40.0
 pyarrow>=14.0.0
+matplotlib>=3.7.0

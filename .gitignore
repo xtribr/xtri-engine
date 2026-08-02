@@ -22,3 +22,6 @@ build/
 .tmp_ui_test/
 exports/
 tmp/
+
+# Staging local de microdados INEP 2025 (2.7 GB) — nunca commitar dados reais.
+/microdados-2025/
