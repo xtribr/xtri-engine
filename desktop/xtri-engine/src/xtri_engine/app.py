@@ -35,7 +35,7 @@ try:
 
     for _env_candidate in (
         APP_SUPPORT_ROOT / ".env",
-        Path("/Volumes/KINGSTON/apps/apps/MIRT/.env"),
+        Path("/Volumes/KINGSTON/apps/MIRT/.env"),
     ):
         if _env_candidate.exists():
             load_dotenv(_env_candidate)
