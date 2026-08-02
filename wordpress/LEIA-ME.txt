@@ -1,0 +1,51 @@
+COMO PUBLICAR NO WORDPRESS — XTRI / ENEM 2025 (ANULAÇÕES)
+=========================================================
+Prof. Alexandre Emerson Melo de Araújo · xtri.online · @xandaoxtri · contato@xtri.online
+
+ARQUIVOS NESTA PASTA
+--------------------
+  1) post-wordpress.html
+       57 KB. É ISTO que você COLA no WordPress (texto do método + prévia de 300 casos +
+       botão de download do PDF + sua assinatura no rodapé). Cola na hora, não trava.
+
+  2) relatorio-redacoes-anuladas-enem-2025-xtri.pdf
+       ~950 KB, 253 páginas. O RELATÓRIO que as pessoas baixam: capa com logo e seus
+       contatos, metodologia e a tabela completa dos 8.278 casos, assinado em todo rodapé.
+
+  3) tabela-completa.html
+       1,4 MB. Tabela interativa completa (8.278 casos) com busca/ordenação, caso queira
+       uma versão navegável no site. NÃO cole; suba como arquivo e linke (ou use iframe).
+
+PASSO A PASSO
+-------------
+  A) Suba na Biblioteca de Mídia (ou via FTP):
+       - relatorio-redacoes-anuladas-enem-2025-xtri.pdf   (o download principal)
+       - tabela-completa.html  (opcional, se quiser a tabela navegável)
+     Anote as URLs geradas.
+
+  B) Crie um Post/Página e adicione um bloco "HTML personalizado" (Custom HTML).
+     Abra post-wordpress.html num editor de texto simples, Cmd+A (selecionar tudo),
+     copie e cole no bloco. (Agora vai colar instantâneo.)
+
+  C) Aponte o botão de download para a URL real do PDF:
+       No HTML há href="relatorio-redacoes-anuladas-enem-2025-xtri.pdf".
+       Troque pela URL do PDF na sua Biblioteca de Mídia.
+       (Opcional) Adicione um link "Ver tabela completa online" -> URL de tabela-completa.html,
+       ou incorpore: <iframe src="URL" width="100%" height="900" style="border:0"></iframe>
+
+  D) Publique.
+
+POR QUE 300 CASOS NO POST (e PDF para o resto)?
+  Tabela gigante dentro do post = página pesada, lenta (ruim para SEO/Core Web Vitals) e que
+  trava o editor do WordPress. A solução: 300 casos no post (texto indexável pelo Google = SEO)
+  + o relatório PDF de 8.278 casos para download. Quer outro número no post, ou o PDF com os
+  67.346 casos completos (ficaria ~1.300 páginas)? É só pedir.
+
+SEM DEPENDÊNCIA EXTERNA
+  Busca/ordenação/paginação em JavaScript próprio embutido (sem jQuery/CDN). Seguro e à prova
+  de tema. A tabela do post é HTML estático (indexável); o JS só melhora a navegação.
+
+SEO
+  - <title> e <meta description> otimizados; H1 + H2 + sua assinatura (autoridade/E-E-A-T).
+  - Slug sugerido: /enem-2025-redacoes-anuladas-corretores
+  - O botão de download do PDF gera engajamento; linke o portal de microdados do INEP como fonte.
