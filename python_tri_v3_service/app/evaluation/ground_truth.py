@@ -15,7 +15,19 @@ OFFICIAL_PARAMS_PATH = (
 )
 
 
+class OfficialParamsNotFoundError(FileNotFoundError):
+    """Parâmetros oficiais INEP ausentes no ambiente local."""
+
+
 def load_official_params(path: Path | str = OFFICIAL_PARAMS_PATH) -> dict:
+    path = Path(path)
+    if not path.is_file():
+        raise OfficialParamsNotFoundError(
+            "Parâmetros oficiais INEP não encontrados em "
+            f"{path}. Copie params_oficiais.json para esse caminho para rodar "
+            "recuperação de parâmetro/atribuição; o k-fold ponta a ponta não "
+            "depende desse arquivo."
+        )
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 

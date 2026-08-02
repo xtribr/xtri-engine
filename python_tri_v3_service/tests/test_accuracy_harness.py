@@ -106,10 +106,14 @@ def test_stocking_lord_recovers_known_transform():
 @pytest.mark.unit
 def test_official_items_and_coprova():
     from app.evaluation.ground_truth import (
+        OFFICIAL_PARAMS_PATH,
         load_official_params,
         official_coprova,
         official_items,
     )
+
+    if not OFFICIAL_PARAMS_PATH.is_file():
+        pytest.skip(f"params_oficiais.json ausente em {OFFICIAL_PARAMS_PATH}")
 
     params = load_official_params()
     assert official_coprova(params, 2024, "MT") == 1323
@@ -117,6 +121,17 @@ def test_official_items_and_coprova():
     items = official_items(params, 2024, "MT")
     assert len(items) == 45
     assert set(items[0].keys()) >= {"a", "b", "c", "posicao", "gabarito"}
+
+
+@pytest.mark.unit
+def test_load_official_params_missing_file_has_actionable_error(tmp_path):
+    from app.evaluation.ground_truth import (
+        OfficialParamsNotFoundError,
+        load_official_params,
+    )
+
+    with pytest.raises(OfficialParamsNotFoundError, match="params_oficiais.json"):
+        load_official_params(tmp_path / "params_oficiais.json")
 
 
 @pytest.mark.unit
@@ -318,7 +333,10 @@ def test_fredao_recovery_real_data_reports_alignment():
     enganosos sob desalinhamento.
     """
     from app.evaluation.fredao_recovery import FREDAO_DIR, run_fredao_recovery
+    from app.evaluation.ground_truth import OFFICIAL_PARAMS_PATH
 
+    if not OFFICIAL_PARAMS_PATH.is_file():
+        pytest.skip(f"params_oficiais.json ausente em {OFFICIAL_PARAMS_PATH}")
     if not FREDAO_DIR.is_dir():
         pytest.skip(f"Simulado Fredão não encontrado em {FREDAO_DIR}")
     rec = run_fredao_recovery(2017)

@@ -21,6 +21,9 @@ layers:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -158,9 +161,21 @@ def _calibrated_cache_path(year: int = 2024):
         return None
     raw_key = cache_key(csv_path, year=year, sample_size=200_000, rng_seed=42)
     calib_path = raw_key.with_stage("calibrated").parquet_path
-    if not calib_path.is_file():
-        return None
-    return calib_path
+    real_app_support = Path(
+        os.getenv(
+            "XTRI_APP_SUPPORT_DIR",
+            Path.home() / "Library" / "Application Support" / "XTRI Engine",
+        )
+    )
+    candidate_paths = [
+        calib_path,
+        real_app_support / "cache" / "microdata" / str(year) / calib_path.name,
+        real_app_support / "microdata_cache" / str(year) / calib_path.name,
+    ]
+    for candidate in dict.fromkeys(candidate_paths):
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 # Published floors from task_plan.md Phase 8 P3 smoke test (2026-04-08) with a

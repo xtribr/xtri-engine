@@ -20,7 +20,11 @@ import numpy as np
 import pandas as pd
 
 from app.evaluation.__main__ import run_recovery_for_group
-from app.evaluation.ground_truth import load_official_params, official_items
+from app.evaluation.ground_truth import (
+    OfficialParamsNotFoundError,
+    load_official_params,
+    official_items,
+)
 from app.evaluation.report import write_report
 
 FREDAO_DIR = Path("/Volumes/KINGSTON/apps/MIRT/Simulado Fredão ")
@@ -71,7 +75,11 @@ def run_fredao_recovery(year: int = 2017, fredao_dir: Path = FREDAO_DIR) -> dict
     computada (chave do ano) quando o alinhamento passa na sanidade — caso
     contrário fica ``None`` e um aviso é emitido (nada de números enganosos).
     """
-    params = load_official_params()
+    try:
+        params = load_official_params()
+    except OfficialParamsNotFoundError as exc:
+        print(f"AVISO: {exc} Recuperação Fredão pulada.", file=sys.stderr)
+        return {}
     recovery: dict = {}
     for area, fname in FREDAO_FILES.items():
         path = Path(fredao_dir) / fname

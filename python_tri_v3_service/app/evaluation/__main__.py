@@ -20,6 +20,7 @@ import numpy as np
 
 from app.evaluation.attribution import decompose_error, score_with_params
 from app.evaluation.ground_truth import (
+    OfficialParamsNotFoundError,
     align_official_to_gabarito,
     load_official_params,
     official_items,
@@ -154,31 +155,35 @@ def main(argv: list[str] | None = None) -> int:
             "mae_ci": (lo, hi),
         }
 
-    params_oficiais = load_official_params()
     attribution: dict = {}
     recovery: dict = {}
-    for area in ATTR_AREAS:
-        official = official_items(params_oficiais, args.year, area)
-        found = _find_azul_group(df, schema, area, official)
-        if found is None:
-            print(
-                f"AVISO: atribuição/recuperação {area} puladas — nenhum caderno do "
-                f"microdata está na ordem oficial (posição global). É necessário o mapa "
-                f"cor+posição→item (Supabase enem_itens_prova), indisponível offline.",
-                file=sys.stderr,
-            )
-            continue
-        resp, nota_ref, valid_cols, official_valid, gab = found
-        if len(resp) < 500:
-            print(f"AVISO: grupo AZUL {area} pequeno ({len(resp)}) — pulado.", file=sys.stderr)
-            continue
+    try:
+        params_oficiais = load_official_params()
+    except OfficialParamsNotFoundError as exc:
+        print(f"AVISO: {exc} Atribuição/recuperação puladas.", file=sys.stderr)
+    else:
+        for area in ATTR_AREAS:
+            official = official_items(params_oficiais, args.year, area)
+            found = _find_azul_group(df, schema, area, official)
+            if found is None:
+                print(
+                    f"AVISO: atribuição/recuperação {area} puladas — nenhum caderno do "
+                    f"microdata está na ordem oficial (posição global). É necessário o mapa "
+                    f"cor+posição→item (Supabase enem_itens_prova), indisponível offline.",
+                    file=sys.stderr,
+                )
+                continue
+            resp, nota_ref, valid_cols, official_valid, gab = found
+            if len(resp) < 500:
+                print(f"AVISO: grupo AZUL {area} pequeno ({len(resp)}) — pulado.", file=sys.stderr)
+                continue
 
-        our_oof = kfold_oof_predictions(resp, area, tabela, k=args.kfolds, c_strategy=args.c_strategy)
-        official_pred = score_with_params(resp[:, valid_cols], official_valid, area, tabela)
-        mask = ~np.isnan(our_oof) & ~np.isnan(nota_ref) & (nota_ref > 0)
-        attribution[area] = decompose_error(our_oof[mask], official_pred[mask], nota_ref[mask])
+            our_oof = kfold_oof_predictions(resp, area, tabela, k=args.kfolds, c_strategy=args.c_strategy)
+            official_pred = score_with_params(resp[:, valid_cols], official_valid, area, tabela)
+            mask = ~np.isnan(our_oof) & ~np.isnan(nota_ref) & (nota_ref > 0)
+            attribution[area] = decompose_error(our_oof[mask], official_pred[mask], nota_ref[mask])
 
-        recovery[area] = {str(args.year): run_recovery_for_group(resp, gab, official)}
+            recovery[area] = {str(args.year): run_recovery_for_group(resp, gab, official)}
 
     report = build_report(
         year=args.year, end_to_end=end_to_end,
