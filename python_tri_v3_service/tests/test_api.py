@@ -44,7 +44,16 @@ def _save_active_mirt_artifact(
     (artifact_dir / "model.rds").write_text("placeholder", encoding="utf-8")
     (artifact_dir / "item_params.json").write_text("[]", encoding="utf-8")
     (artifact_dir / "factor_scores.csv").write_text("student_id,G,SE_G\ns1,0.2,0.1\n", encoding="utf-8")
-    (artifact_dir / "fit_summary.json").write_text("{}", encoding="utf-8")
+    (artifact_dir / "fit_summary.json").write_text(
+        json.dumps(
+            {
+                "model_id": model.model_id,
+                "family": model.family,
+                "qmatrix_version": model.qmatrix_version,
+            }
+        ),
+        encoding="utf-8",
+    )
     (artifact_dir / "diagnostics.json").write_text("{}", encoding="utf-8")
     (artifact_dir / "qmatrix_snapshot.json").write_text(
         qmatrix.model_dump_json(indent=2),
@@ -477,7 +486,7 @@ class TestEstimarThetaMIRT:
     ):
         simulado_id = "simulado_mirt_ok"
         area = "MT"
-        ano = 2091
+        ano = 2024
         artifact = _save_active_mirt_artifact(
             simulado_id=simulado_id,
             area=area,
@@ -503,7 +512,8 @@ class TestEstimarThetaMIRT:
                 "area": area,
                 "ano_referencia": ano,
                 "simulado_id": simulado_id,
-                "transformacao": {"mu": 500.0, "sigma": 100.0},
+                "transformacao": {"theta_ref_centro": 0.0, "theta_ref_escala": 1.0},
+                "item_ids": [f"{area.lower()}_{idx:03d}" for idx in range(1, 46)],
                 "respostas": respostas_binarias_50x45[0],
             })
 
@@ -518,13 +528,13 @@ class TestEstimarThetaMIRT:
         assert body["se_mirt"]["G"] == 0.11
 
     @pytest.mark.api
-    def test_cai_para_unidim_quando_nao_ha_artefato_mirt(
+    def test_nao_cai_para_unidim_quando_nao_ha_artefato_mirt(
         self,
         client: TestClient,
         respostas_binarias_50x45,
     ):
         simulado_id = "simulado_sem_mirt"
-        ano = 2092
+        ano = 2024
         alunos = [
             {"aluno_id": str(i), "nome": f"Aluno {i}", "respostas": r}
             for i, r in enumerate(respostas_binarias_50x45)
@@ -541,23 +551,21 @@ class TestEstimarThetaMIRT:
             "area": "MT",
             "ano_referencia": ano,
             "simulado_id": simulado_id,
+            "item_ids": [f"mt_{idx:03d}" for idx in range(1, 46)],
             "respostas": respostas_binarias_50x45[0],
         })
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["modelo_usado"] == "unidim"
-        assert body["fallback_modelo"] == "mirt"
-        assert body["scores_mirt"] is None
+        assert resp.status_code == 404
+        assert "Nenhum modelo MIRT ativo" in resp.json()["detail"]
 
     @pytest.mark.api
-    def test_cai_para_unidim_quando_rscript_indisponivel(
+    def test_retorna_erro_quando_rscript_indisponivel(
         self,
         client: TestClient,
         respostas_binarias_50x45,
     ):
         simulado_id = "simulado_mirt_sem_rscript"
-        ano = 2093
+        ano = 2024
         alunos = [
             {"aluno_id": str(i), "nome": f"Aluno {i}", "respostas": r}
             for i, r in enumerate(respostas_binarias_50x45)
@@ -581,22 +589,21 @@ class TestEstimarThetaMIRT:
                 "area": "MT",
                 "ano_referencia": ano,
                 "simulado_id": simulado_id,
+                "item_ids": [f"mt_{idx:03d}" for idx in range(1, 46)],
                 "respostas": respostas_binarias_50x45[1],
             })
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["modelo_usado"] == "unidim"
-        assert body["fallback_modelo"] == "mirt"
+        assert resp.status_code == 502
+        assert "Rscript" in resp.json()["detail"]
 
     @pytest.mark.api
-    def test_cai_para_unidim_quando_scoring_mirt_falha(
+    def test_retorna_erro_quando_scoring_mirt_falha(
         self,
         client: TestClient,
         respostas_binarias_50x45,
     ):
         simulado_id = "simulado_mirt_falha"
-        ano = 2094
+        ano = 2024
         alunos = [
             {"aluno_id": str(i), "nome": f"Aluno {i}", "respostas": r}
             for i, r in enumerate(respostas_binarias_50x45)
@@ -623,13 +630,12 @@ class TestEstimarThetaMIRT:
                 "area": "MT",
                 "ano_referencia": ano,
                 "simulado_id": simulado_id,
+                "item_ids": [f"mt_{idx:03d}" for idx in range(1, 46)],
                 "respostas": respostas_binarias_50x45[2],
             })
 
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["modelo_usado"] == "unidim"
-        assert body["fallback_modelo"] == "mirt"
+        assert resp.status_code == 502
+        assert "falha no score" in resp.json()["detail"]
 
     @pytest.mark.api
     def test_retorna_erro_quando_fallback_esta_desligado(
@@ -642,10 +648,11 @@ class TestEstimarThetaMIRT:
             "ano_referencia": 2095,
             "simulado_id": "simulado_sem_fallback",
             "permitir_fallback_unidim": False,
+            "item_ids": [f"mt_{idx:03d}" for idx in range(1, 46)],
             "respostas": respostas_binarias_50x45[0],
         })
 
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         assert "Nenhum modelo MIRT ativo" in resp.json()["detail"]
 
     @pytest.mark.api
@@ -664,6 +671,7 @@ class TestEstimarThetaMIRT:
             "area": "MT",
             "ano_referencia": 2096,
             "simulado_id": "simulado_mirt_tamanho",
+            "item_ids": [f"mt_{idx:03d}" for idx in range(1, 46)],
             "respostas": [1, 0, 1],
         })
 

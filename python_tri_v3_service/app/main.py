@@ -49,6 +49,7 @@ from . import state
 from .tabela_referencia import TabelaReferenciaTRI
 from .jobs.calibration_jobs import submit_microdata_job  # noqa: F401 (re-export)
 from .microdata.jobs import job_manager
+from .mirt.jobs import job_manager as mirt_job_manager
 from .microdata.loader import default_csv_path  # noqa: F401 (re-export)
 from .mirt.runner import mirt_runtime_available, run_mirt_score  # noqa: F401 (re-export)
 from .runtime.local_paths import ensure_app_support_layout
@@ -78,6 +79,12 @@ async def lifespan(app: FastAPI):
         print(f"  Jobs restaurados do disco: {restored_jobs}")
     except Exception as e:
         print(f"  AVISO: jobs locais não restaurados: {e}")
+
+    try:
+        restored_mirt_jobs = mirt_job_manager.reload_from_disk()
+        print(f"  Jobs MIRT restaurados do disco: {restored_mirt_jobs}")
+    except Exception as e:
+        print(f"  AVISO: jobs MIRT não restaurados: {e}")
 
     try:
         tabela = TabelaReferenciaTRI()
@@ -122,11 +129,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS aberto (mesmo comportamento do Flask V2)
+# CORS continua aberto por padrão para retrocompatibilidade. Em produção,
+# `XTRI_CORS_ORIGINS=https://app.exemplo.com,https://admin.exemplo.com` limita
+# explicitamente os sites autorizados.
+_cors_raw = os.getenv("XTRI_CORS_ORIGINS", "*")
+_cors_origins = [origin.strip() for origin in _cors_raw.split(",") if origin.strip()]
+if not _cors_origins:
+    _cors_origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials="*" not in _cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -2,6 +2,7 @@
 Shared fixtures for XTRI Engine API tests.
 """
 
+import os
 from unittest import mock
 
 import numpy as np
@@ -17,7 +18,9 @@ def temp_model_storage(tmp_path_factory):
     """Redireciona storage local para um diretório temporário durante os testes."""
 
     temp_root = tmp_path_factory.mktemp("xtri_app_support")
-    with mock.patch("app.runtime.local_paths.APP_SUPPORT_ROOT", temp_root), mock.patch(
+    with mock.patch.dict(
+        os.environ, {"XTRI_MIRT_ALLOW_UNAUTHENTICATED": "true"}
+    ), mock.patch("app.runtime.local_paths.APP_SUPPORT_ROOT", temp_root), mock.patch(
         "app.runtime.local_paths.MODELS_ROOT", temp_root / "models"
     ), mock.patch(
         "app.runtime.local_paths.UNIDIM_MODELS_ROOT", temp_root / "models" / "unidim"

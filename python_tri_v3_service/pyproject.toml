@@ -41,6 +41,7 @@ exclude = ["tests*"]
 [tool.setuptools.package-data]
 app = [
     "referencias/*.json",
+    "scripts/*.R",
     "static/*",
 ]
 

@@ -6,8 +6,54 @@ Contém os schemas de entrada/saída para ambos os motores:
 - Motor Científico (MML + EAP)
 """
 
-from pydantic import BaseModel, Field
-from typing import Dict, List, Optional, Any, Union
+import math
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Dict, List, Optional, Any, Union, Literal
+
+from .mirt.contracts import (
+    MIRTQMatrix,
+    SAFE_ID_PATTERN,
+    validate_mirt_factor_id,
+    validate_mirt_item_id,
+)
+from .mirt.qmatrix import build_model_spec_from_qmatrix, validate_qmatrix
+
+
+def _validar_id_publico(value: Optional[str], *, field_name: str) -> Optional[str]:
+    """Normaliza IDs públicos usados em registry/glob e bloqueia curingas."""
+
+    if value is None:
+        return None
+    value = value.strip()
+    if not SAFE_ID_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{field_name} deve usar apenas letras, números, ponto, hífen ou underscore"
+        )
+    return value
+
+
+def _validar_transformacao_latente(
+    value: Optional[Dict[str, float]],
+) -> Optional[Dict[str, float]]:
+    """Aceita somente linking explícito da escala theta; mu/sigma não são equivalentes."""
+
+    if value is None:
+        return None
+    allowed = {"theta_ref_centro", "theta_ref_escala"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(
+            "transformacao MIRT aceita apenas theta_ref_centro/theta_ref_escala; "
+            f"campos inválidos: {', '.join(sorted(unknown))}"
+        )
+    centro = float(value.get("theta_ref_centro", 0.0))
+    escala = float(value.get("theta_ref_escala", 1.0))
+    if not math.isfinite(centro) or not math.isfinite(escala):
+        raise ValueError("transformacao MIRT exige valores finitos")
+    if escala <= 0:
+        raise ValueError("theta_ref_escala deve ser positiva")
+    return value
 
 
 # ════════════════════════════════════════════════════════════════════════════════
@@ -251,7 +297,7 @@ class ResponseEstimarTheta(BaseModel):
 class RequestEstimarThetaMIRT(BaseModel):
     """
     Payload para /api/v5/mirt/estimar-theta.
-    Tenta scorear via artefato MIRT local e, se necessário, cai para unidim.
+    Scoreia uma prova completa via artefato MIRT local, com ordem explícita.
     """
 
     area: str
@@ -266,16 +312,60 @@ class RequestEstimarThetaMIRT(BaseModel):
     )
     transformacao: Optional[Dict[str, float]] = Field(
         default=None,
-        description="Transformação opcional `theta -> nota` com campos `mu` e `sigma`",
+        description="Linking opcional com `theta_ref_centro` e `theta_ref_escala`",
     )
-    permitir_fallback_unidim: bool = Field(
-        default=True,
-        description="Se True, cai para o modelo unidimensional quando o MIRT não estiver disponível",
+    permitir_fallback_unidim: Literal[False] = Field(
+        default=False,
+        description=(
+            "Mantido no contrato apenas para explicitar que fallback posicional "
+            "unidimensional não é permitido"
+        ),
     )
     respostas: List[int] = Field(
         ...,
         description="Vetor binário de respostas (0/1)",
     )
+    item_ids: List[str] = Field(
+        ...,
+        min_length=45,
+        max_length=45,
+        description="Ordem explícita dos 45 itens; deve coincidir com a Q-matrix",
+    )
+
+    @field_validator("respostas", mode="before")
+    @classmethod
+    def _validar_respostas_binarias(cls, value: Any) -> Any:
+        if not isinstance(value, list) or not value:
+            raise ValueError("respostas deve ser uma lista não vazia")
+        if any(type(resposta) is not int or resposta not in (0, 1) for resposta in value):
+            raise ValueError("respostas aceita somente 0 ou 1")
+        return value
+
+    @field_validator("simulado_id", "artefato_id")
+    @classmethod
+    def _validar_ids_publicos(cls, value: Optional[str], info: Any) -> Optional[str]:
+        return _validar_id_publico(value, field_name=info.field_name)
+
+    @field_validator("item_ids")
+    @classmethod
+    def _validar_item_ids(cls, value: List[str]) -> List[str]:
+        normalized = [validate_mirt_item_id(item_id) for item_id in value]
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("item_ids duplicados")
+        return normalized
+
+    @field_validator("transformacao")
+    @classmethod
+    def _validar_transformacao(
+        cls, value: Optional[Dict[str, float]]
+    ) -> Optional[Dict[str, float]]:
+        return _validar_transformacao_latente(value)
+
+    @model_validator(mode="after")
+    def _validar_seletor_de_artefato(self) -> "RequestEstimarThetaMIRT":
+        if (self.simulado_id is None) == (self.artefato_id is None):
+            raise ValueError("Informe exatamente um entre simulado_id e artefato_id")
+        return self
 
 
 class ResponseEstimarThetaMIRT(BaseModel):
@@ -296,7 +386,7 @@ class ResponseEstimarThetaMIRT(BaseModel):
     )
     fallback_modelo: Optional[str] = Field(
         default=None,
-        description="Modelo originalmente tentado antes do fallback, quando aplicável",
+        description="Campo legado; a API pública MIRT não executa fallback posicional",
     )
     scores_mirt: Optional[Dict[str, float]] = Field(
         default=None,
@@ -306,6 +396,316 @@ class ResponseEstimarThetaMIRT(BaseModel):
         default=None,
         description="Erros padrão por fator retornados pelo worker MIRT",
     )
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODELOS — API PÚBLICA MIRT (CALIBRAÇÃO E LOTE)
+# ══════════════════════════════════════════════════════════════════════════════
+
+RespostaBinariaOpcional = Optional[Literal[0, 1]]
+
+
+class AlunoMIRT(BaseModel):
+    """Linha de respostas de um aluno para calibração ou scoring MIRT."""
+
+    aluno_id: str = Field(..., min_length=1, max_length=128)
+    nome: Optional[str] = Field(default="", max_length=300)
+    respostas: List[RespostaBinariaOpcional] = Field(
+        ...,
+        min_length=1,
+        description="0=erro, 1=acerto, null=item ausente/não aplicado",
+    )
+
+    @field_validator("respostas", mode="before")
+    @classmethod
+    def _rejeitar_valores_nao_binarios(cls, value: Any) -> Any:
+        if not isinstance(value, list):
+            raise ValueError("respostas deve ser uma lista")
+        for resposta in value:
+            if resposta is None:
+                continue
+            if type(resposta) is not int or resposta not in (0, 1):
+                raise ValueError("respostas aceita somente 0, 1 ou null")
+        return value
+
+    @field_validator("aluno_id")
+    @classmethod
+    def _normalizar_aluno_id(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("aluno_id não pode ser vazio")
+        if any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("aluno_id não pode conter caracteres de controle")
+        return value
+
+    @field_validator("respostas")
+    @classmethod
+    def _validar_respostas_informativas(
+        cls, value: List[RespostaBinariaOpcional]
+    ) -> List[RespostaBinariaOpcional]:
+        if all(resposta is None for resposta in value):
+            raise ValueError("Aluno precisa ter ao menos uma resposta observada")
+        return value
+
+
+class RequestCalibrarMIRT(BaseModel):
+    """Cria uma calibração MIRT assíncrona para um simulado × área."""
+
+    simulado_id: str = Field(..., min_length=1, max_length=128)
+    area: str
+    ano_referencia: int = Field(default=2024, ge=2009, le=2100)
+    familia: Literal["bifactor", "compensatorio"] = "bifactor"
+    scoring_factor_id: str = Field(default="G", min_length=1, max_length=64)
+    qmatrix: MIRTQMatrix
+    alunos: List[AlunoMIRT] = Field(..., min_length=100, max_length=100_000)
+
+    @field_validator("simulado_id")
+    @classmethod
+    def _normalizar_simulado_id(cls, value: str) -> str:
+        validated = _validar_id_publico(value, field_name="simulado_id")
+        assert validated is not None
+        return validated
+
+    @field_validator("scoring_factor_id")
+    @classmethod
+    def _validar_scoring_factor_id(cls, value: str) -> str:
+        return validate_mirt_factor_id(value, field_name="scoring_factor_id")
+
+    @field_validator("area")
+    @classmethod
+    def _normalizar_area(cls, value: str) -> str:
+        value = value.strip().upper()
+        if value not in {"LC", "CH", "CN", "MT"}:
+            raise ValueError("area deve ser LC, CH, CN ou MT")
+        return value
+
+    @model_validator(mode="after")
+    def _validar_matriz(self) -> "RequestCalibrarMIRT":
+        if self.qmatrix.area != self.area:
+            raise ValueError("A área da Q-matrix difere da área da calibração")
+        if self.qmatrix.is_template:
+            raise ValueError("Q-matrix de template não pode ser usada em calibração")
+        validate_qmatrix(self.qmatrix, allow_template=False)
+
+        n_itens = len(self.qmatrix.rows)
+        if n_itens < 2:
+            raise ValueError("A calibração MIRT exige ao menos 2 itens")
+        if n_itens > 45:
+            raise ValueError("Uma calibração MIRT por área ENEM aceita no máximo 45 itens")
+        ids = [aluno.aluno_id for aluno in self.alunos]
+        if len(ids) != len(set(ids)):
+            raise ValueError("aluno_id duplicado na calibração")
+        for aluno in self.alunos:
+            if len(aluno.respostas) != n_itens:
+                raise ValueError(
+                    f"Aluno {aluno.aluno_id} tem {len(aluno.respostas)} respostas; "
+                    f"esperado: {n_itens}"
+                )
+        for idx, row in enumerate(zip(*(aluno.respostas for aluno in self.alunos))):
+            observed = [resposta for resposta in row if resposta is not None]
+            if not observed:
+                raise ValueError(
+                    f"Item {self.qmatrix.rows[idx].item_id} está ausente para toda a coorte"
+                )
+            n_errors = observed.count(0)
+            n_correct = observed.count(1)
+            if min(n_errors, n_correct) < 5:
+                raise ValueError(
+                    f"Item {self.qmatrix.rows[idx].item_id} exige ao menos 5 erros e 5 acertos observados"
+                )
+
+        if self.familia == "bifactor":
+            general_ids = {
+                factor.factor_id
+                for factor in self.qmatrix.factors
+                if factor.kind == "geral"
+            }
+            specific_ids = {
+                factor.factor_id
+                for factor in self.qmatrix.factors
+                if factor.kind == "especifico"
+            }
+            if len(specific_ids) < 2:
+                raise ValueError(
+                    "Bifactor exige ao menos dois fatores específicos identificáveis"
+                )
+            if general_ids != {self.scoring_factor_id}:
+                raise ValueError(
+                    "Bifactor exige exatamente um fator geral, usado como scoring_factor_id"
+                )
+            indicator_counts = {factor_id: 0 for factor_id in specific_ids}
+            for row in self.qmatrix.rows:
+                if row.cargas.get(self.scoring_factor_id) != 1:
+                    raise ValueError(
+                        f"Item {row.item_id} precisa carregar o fator geral no bifactor"
+                    )
+                active_specifics = [
+                    factor_id
+                    for factor_id in specific_ids
+                    if row.cargas.get(factor_id) == 1
+                ]
+                if len(active_specifics) != 1:
+                    raise ValueError(
+                        f"Item {row.item_id} precisa carregar exatamente um fator específico"
+                    )
+                indicator_counts[active_specifics[0]] += 1
+            underidentified = [
+                factor_id for factor_id, count in indicator_counts.items() if count < 3
+            ]
+            if underidentified:
+                raise ValueError(
+                    "Cada fator específico bifatorial exige ao menos 3 itens; insuficientes: "
+                    + ", ".join(sorted(underidentified))
+                )
+        else:
+            factor_order = [factor.factor_id for factor in self.qmatrix.factors]
+            signatures = {
+                factor_id: tuple(
+                    int(row.cargas.get(factor_id, 0)) for row in self.qmatrix.rows
+                )
+                for factor_id in factor_order
+            }
+            if len(set(signatures.values())) != len(signatures):
+                raise ValueError(
+                    "Fatores compensatórios não podem ter vetores de carga idênticos"
+                )
+            indicator_counts = {
+                factor.factor_id: sum(
+                    row.cargas.get(factor.factor_id) == 1
+                    for row in self.qmatrix.rows
+                )
+                for factor in self.qmatrix.factors
+            }
+            underidentified = [
+                factor_id for factor_id, count in indicator_counts.items() if count < 3
+            ]
+            if underidentified:
+                raise ValueError(
+                    "Cada fator compensatório exige ao menos 3 itens; insuficientes: "
+                    + ", ".join(sorted(underidentified))
+                )
+        build_model_spec_from_qmatrix(
+            self.qmatrix,
+            family=self.familia,
+            scoring_factor_id=self.scoring_factor_id,
+        )
+        return self
+
+
+class ResponseCalibrarMIRT(BaseModel):
+    """Confirmação de enfileiramento da calibração MIRT."""
+
+    job_id: str
+    status: Literal["queued"]
+    status_url: str
+
+
+class ResponseJobMIRT(BaseModel):
+    """Estado persistido de uma calibração MIRT."""
+
+    job_id: str
+    status: Literal["queued", "running", "done", "error"]
+    progress: float
+    stage: Optional[str] = None
+    simulado_id: str
+    area: str
+    ano_referencia: int
+    n_alunos: int
+    n_itens: int
+    model_id: Optional[str] = None
+    artifact_id: Optional[str] = None
+    fit_summary: Optional[Dict[str, Any]] = None
+    warnings: List[str] = Field(default_factory=list)
+    error: Optional[str] = None
+    elapsed_seconds: Optional[float] = None
+
+
+class RequestEstimarLoteMIRT(BaseModel):
+    """Escora vários alunos com uma única chamada ao worker MIRT."""
+
+    area: str
+    ano_referencia: int = Field(default=2024, ge=2009, le=2100)
+    simulado_id: Optional[str] = Field(default=None, max_length=128)
+    artefato_id: Optional[str] = Field(default=None, max_length=128)
+    item_ids: List[str] = Field(
+        ...,
+        min_length=1,
+        max_length=45,
+        description="Ordem explícita dos itens; deve coincidir com a Q-matrix do artefato",
+    )
+    transformacao: Optional[Dict[str, float]] = None
+    alunos: List[AlunoMIRT] = Field(..., min_length=1, max_length=10_000)
+
+    @field_validator("area")
+    @classmethod
+    def _normalizar_area(cls, value: str) -> str:
+        value = value.strip().upper()
+        if value not in {"LC", "CH", "CN", "MT"}:
+            raise ValueError("area deve ser LC, CH, CN ou MT")
+        return value
+
+    @field_validator("simulado_id", "artefato_id")
+    @classmethod
+    def _validar_ids_publicos(cls, value: Optional[str], info: Any) -> Optional[str]:
+        return _validar_id_publico(value, field_name=info.field_name)
+
+    @field_validator("transformacao")
+    @classmethod
+    def _validar_transformacao(
+        cls, value: Optional[Dict[str, float]]
+    ) -> Optional[Dict[str, float]]:
+        return _validar_transformacao_latente(value)
+
+    @field_validator("item_ids")
+    @classmethod
+    def _validar_item_ids(cls, value: List[str]) -> List[str]:
+        normalized: List[str] = []
+        for item_id in value:
+            normalized.append(validate_mirt_item_id(item_id))
+        if len(normalized) != len(set(normalized)):
+            raise ValueError("item_ids duplicados no lote")
+        return normalized
+
+    @model_validator(mode="after")
+    def _validar_ids(self) -> "RequestEstimarLoteMIRT":
+        if (self.simulado_id is None) == (self.artefato_id is None):
+            raise ValueError("Informe exatamente um entre simulado_id e artefato_id")
+        ids = [aluno.aluno_id for aluno in self.alunos]
+        if len(ids) != len(set(ids)):
+            raise ValueError("aluno_id duplicado no lote")
+        return self
+
+
+class ResultadoAlunoMIRTLote(BaseModel):
+    """Resultado multidimensional individual dentro de um lote."""
+
+    aluno_id: str
+    nome: Optional[str] = ""
+    acertos: int
+    itens_respondidos: int
+    itens_ausentes: int
+    completo: bool
+    elegivel_nota_ancorada: bool
+    theta: float
+    se: float
+    nota_ancorada: Optional[float] = None
+    estado_tri: Optional[str] = None
+    scores_mirt: Dict[str, float]
+    se_mirt: Dict[str, float]
+    avisos: List[str] = Field(default_factory=list)
+
+
+class ResponseEstimarLoteMIRT(BaseModel):
+    """Resposta do scoring MIRT em lote."""
+
+    status: Literal["sucesso"]
+    area: str
+    ano_referencia: int
+    artefato_id: str
+    qmatrix_version: str
+    modelo_usado: Literal["mirt"] = "mirt"
+    n_alunos: int
+    resultados: List[ResultadoAlunoMIRTLote]
 
 
 # ════════════════════════════════════════════════════════════════════════════════

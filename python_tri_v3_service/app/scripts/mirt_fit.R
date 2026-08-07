@@ -66,7 +66,8 @@ if (!requireNamespace("mirt", quietly = TRUE)) {
 response_df <- utils::read.csv(
   payload$response_matrix_path,
   stringsAsFactors = FALSE,
-  check.names = FALSE
+  check.names = FALSE,
+  colClasses = "character"
 )
 student_id_col <- if ("student_id" %in% names(response_df)) "student_id" else names(response_df)[1]
 item_cols <- setdiff(names(response_df), student_id_col)
@@ -75,6 +76,7 @@ if (length(item_cols) == 0) {
 }
 
 response_matrix <- as.matrix(response_df[, item_cols, drop = FALSE])
+response_matrix[response_matrix == ""] <- NA_character_
 storage.mode(response_matrix) <- "numeric"
 
 qmatrix_spec <- fromJSON(payload$qmatrix_path, simplifyVector = FALSE)
@@ -119,6 +121,11 @@ if (length(missing_items) > 0) {
 qtable <- qtable[item_cols, , drop = FALSE]
 general_factor_id <- payload$model_spec$scoring_factor_id
 model_family <- payload$model_spec$family
+score_factor_ids <- factor_ids
+guess_value <- if (nrow(response_matrix) < 500) 0.20 else 0.0
+guess_values <- rep(guess_value, ncol(response_matrix))
+estimation_method <- "EM"
+convergence_tolerance <- 1e-3
 
 fit <- tryCatch({
   if (identical(model_family, "bifactor")) {
@@ -139,12 +146,15 @@ fit <- tryCatch({
       specific[[idx]] <- active_specifics[[1]]
     }
 
+    score_factor_ids <- c(general_factor_id, specific_factor_ids)
     mirt::bfactor(
       response_matrix,
-      specific = specific,
+      model = specific,
       itemtype = "2PL",
+      guess = guess_values,
       verbose = FALSE,
-      technical = list(NCYCLES = 500)
+      TOL = convergence_tolerance,
+      technical = list(NCYCLES = 1000)
     )
   } else if (identical(model_family, "compensatorio")) {
     syntax_lines <- c()
@@ -164,12 +174,17 @@ fit <- tryCatch({
     }
 
     model_def <- mirt::mirt.model(paste(syntax_lines, collapse = "\n"))
+    estimation_method <- if (ncol(qtable) > 3) "MHRM" else "EM"
+    set.seed(20260807)
     mirt::mirt(
       response_matrix,
       model = model_def,
       itemtype = "2PL",
+      guess = guess_values,
+      method = estimation_method,
       verbose = FALSE,
-      technical = list(NCYCLES = 500)
+      TOL = convergence_tolerance,
+      technical = list(NCYCLES = 1000)
     )
   } else {
     stop(sprintf("Família MIRT não suportada pelo worker: %s", model_family))
@@ -182,6 +197,24 @@ fit <- tryCatch({
   )
 })
 
+converged <- isTRUE(mirt::extract.mirt(fit, "converged"))
+iterations <- as.integer(mirt::extract.mirt(fit, "iterations"))
+second_order_test <- mirt::extract.mirt(fit, "secondordertest")
+condition_number <- suppressWarnings(
+  as.numeric(mirt::extract.mirt(fit, "condnum"))
+)
+parameters <- as.numeric(mirt::extract.mirt(fit, "parvec"))
+if (!converged) {
+  fail(
+    sprintf("O ajuste MIRT não convergiu após %s iterações.", iterations),
+    output_dir,
+    payload$model_spec
+  )
+}
+if (any(!is.finite(parameters))) {
+  fail("O ajuste MIRT produziu parâmetros não finitos.", output_dir, payload$model_spec)
+}
+
 model_rds_path <- file.path(output_dir, "model.rds")
 item_params_path <- file.path(output_dir, "item_params.json")
 factor_scores_path <- file.path(output_dir, "factor_scores.csv")
@@ -191,10 +224,24 @@ qmatrix_snapshot_path <- file.path(output_dir, "qmatrix_snapshot.json")
 worker_output_path <- file.path(output_dir, "worker_output.json")
 
 saveRDS(fit, model_rds_path)
-write_json(qmatrix_spec, qmatrix_snapshot_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+qmatrix_copied <- file.copy(
+  payload$qmatrix_path,
+  qmatrix_snapshot_path,
+  overwrite = TRUE
+)
+if (!qmatrix_copied) {
+  fail("Não foi possível persistir o snapshot exato da Q-matrix.")
+}
 
-coefs <- mirt::coef(fit, IRTpars = TRUE, simplify = TRUE)
+coefs <- mirt::coef(fit, IRTpars = FALSE, simplify = TRUE)
 item_params <- as.data.frame(coefs$items)
+slope_columns <- paste0("a", seq_along(score_factor_ids))
+for (idx in seq_along(slope_columns)) {
+  if (slope_columns[[idx]] %in% names(item_params)) {
+    names(item_params)[names(item_params) == slope_columns[[idx]]] <-
+      paste0("a_", score_factor_ids[[idx]])
+  }
+}
 item_params$item_id <- rownames(item_params)
 rownames(item_params) <- NULL
 write_json(
@@ -206,17 +253,49 @@ write_json(
   dataframe = "rows"
 )
 
-scores <- as.data.frame(mirt::fscores(fit, method = "EAP", full.scores.SE = TRUE))
-scores <- normalize_score_columns(scores, factor_ids)
-scores$student_id <- response_df[[student_id_col]]
-scores <- scores[, c("student_id", setdiff(names(scores), "student_id")), drop = FALSE]
-utils::write.csv(scores, factor_scores_path, row.names = FALSE)
+score_method <- if (length(score_factor_ids) > 3) "MAP" else "EAP"
+retain_scores <- tolower(Sys.getenv("XTRI_MIRT_RETAIN_RESPONSES", "")) %in%
+  c("1", "true", "yes")
+if (retain_scores) {
+  scores <- as.data.frame(
+    mirt::fscores(fit, method = score_method, full.scores.SE = TRUE)
+  )
+  scores <- normalize_score_columns(scores, score_factor_ids)
+  scores$student_id <- response_df[[student_id_col]]
+  scores <- scores[, c("student_id", setdiff(names(scores), "student_id")), drop = FALSE]
+  utils::write.csv(scores, factor_scores_path, row.names = FALSE)
+} else {
+  score_columns <- c(
+    "student_id",
+    score_factor_ids,
+    paste0("SE_", score_factor_ids)
+  )
+  empty_scores <- as.data.frame(
+    matrix(nrow = 0, ncol = length(score_columns)),
+    stringsAsFactors = FALSE
+  )
+  names(empty_scores) <- score_columns
+  utils::write.csv(empty_scores, factor_scores_path, row.names = FALSE)
+}
 
 fit_summary <- list(
   model_id = payload$model_spec$model_id,
   family = model_family,
   qmatrix_version = payload$model_spec$qmatrix_version,
-  logLik = as.numeric(mirt::extract.mirt(fit, "LL")),
+  converged = converged,
+  iterations = iterations,
+  second_order_test = second_order_test,
+  condition_number = condition_number,
+  estimation_method = estimation_method,
+  convergence_tolerance = convergence_tolerance,
+  scoring_method = score_method,
+  parameterization = "multidim_slope_intercept",
+  c_fixo = guess_value,
+  c_policy = if (guess_value > 0) "fixo_0.20_amostra_menor_500" else "2PL_sem_chute",
+  R_version = R.version.string,
+  mirt_version = as.character(utils::packageVersion("mirt")),
+  jsonlite_version = as.character(utils::packageVersion("jsonlite")),
+  logLik = as.numeric(mirt::extract.mirt(fit, "logLik")),
   AIC = as.numeric(mirt::extract.mirt(fit, "AIC")),
   BIC = as.numeric(mirt::extract.mirt(fit, "BIC"))
 )
@@ -227,10 +306,46 @@ diagnostics <- list(
   n_items = ncol(response_matrix),
   factor_ids = colnames(qtable),
   scoring_factor_id = general_factor_id,
+  scoring_method = score_method,
+  parameterization = "multidim_slope_intercept",
+  estimation_method = estimation_method,
+  convergence_tolerance = convergence_tolerance,
+  converged = converged,
+  iterations = iterations,
+  second_order_test = second_order_test,
+  condition_number = condition_number,
+  c_fixo = guess_value,
+  R_version = R.version.string,
+  mirt_version = as.character(utils::packageVersion("mirt")),
+  jsonlite_version = as.character(utils::packageVersion("jsonlite")),
   response_matrix_path = payload$response_matrix_path,
   qmatrix_path = payload$qmatrix_path
 )
 write_json(diagnostics, diagnostics_path, auto_unbox = TRUE, pretty = TRUE, null = "null")
+
+worker_warnings <- list()
+if (identical(score_method, "MAP")) {
+  worker_warnings <- append(
+    worker_warnings,
+    "MAP usado no scoring por haver mais de 3 fatores latentes"
+  )
+}
+if (!retain_scores) {
+  worker_warnings <- append(
+    worker_warnings,
+    "Scores da coorte não foram persistidos pela política de privacidade"
+  )
+}
+worker_warnings <- append(
+  worker_warnings,
+  "model.rds contém padrões de resposta desidentificados; proteja o volume de runtime"
+)
+if (identical(second_order_test, FALSE)) {
+  worker_warnings <- append(
+    worker_warnings,
+    "O ajuste não passou no teste de segunda ordem; revise os diagnósticos"
+  )
+}
 
 worker_output <- list(
   status = "done",
@@ -246,7 +361,7 @@ worker_output <- list(
     diagnostics_path = diagnostics_path,
     qmatrix_snapshot_path = qmatrix_snapshot_path
   ),
-  warnings = list(),
+  warnings = worker_warnings,
   error = NULL
 )
 write_json(worker_output, worker_output_path, auto_unbox = TRUE, pretty = TRUE, null = "null")

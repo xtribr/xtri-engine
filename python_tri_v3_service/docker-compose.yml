@@ -20,6 +20,7 @@ services:
       - PYTHONUNBUFFERED=1
       - SUPABASE_URL=${SUPABASE_URL:-}
       - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - XTRI_APP_SUPPORT_DIR=/var/lib/xtri
     env_file:
       - ../.env
     volumes:
@@ -27,6 +28,8 @@ services:
       - ./app:/app/app:ro
       # Microdata oficial INEP (read-only). Caminho no host vem do .env
       - ${MICRODATA_PATH:-../data}:/data:ro
+      # Modelos, jobs e registry sobrevivem à recriação do container.
+      - xtri-runtime:/var/lib/xtri
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5003/health')"]
@@ -34,3 +37,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  xtri-runtime:

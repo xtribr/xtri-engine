@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import threading
 from typing import Any, Dict, Optional
 
 from .artifacts import APP_SUPPORT_ROOT, DEFAULT_UNIDIM_MODEL
 
 MODEL_REGISTRY_PATH = APP_SUPPORT_ROOT / "models" / "active_models.json"
+_REGISTRY_LOCK = threading.RLock()
 
 
 def infer_model_family(modelo: str) -> str:
@@ -56,10 +58,10 @@ def set_active_model(
     manifest: Dict[str, Any],
     *,
     modelo: Optional[str] = None,
+    exclusive_family: bool = False,
 ) -> Dict[str, Any]:
     """Registra o manifesto informado como modelo ativo do seu escopo."""
 
-    current = _read_registry()
     model_name = modelo or str(manifest["modelo"])
     key = registry_key(
         ano_referencia=int(manifest["ano_referencia"]),
@@ -67,7 +69,7 @@ def set_active_model(
         scope_id=str(manifest["scope_id"]),
         modelo=model_name,
     )
-    current[key] = {
+    entry = {
         "artifact_id": manifest["artifact_id"],
         "artifact_dir": manifest["artifact_dir"],
         "simulado_id": manifest["simulado_id"],
@@ -78,8 +80,23 @@ def set_active_model(
         "modelo": model_name,
         "saved_at_utc": manifest["saved_at_utc"],
     }
-    _write_registry(current)
-    return current[key]
+    with _REGISTRY_LOCK:
+        current = _read_registry()
+        if exclusive_family:
+            family = infer_model_family(model_name)
+            for existing_key, existing in list(current.items()):
+                same_scope = (
+                    int(existing.get("ano_referencia", -1))
+                    == int(manifest["ano_referencia"])
+                    and str(existing.get("area", "")).upper()
+                    == str(manifest["area"]).upper()
+                    and str(existing.get("scope_id", "")) == str(manifest["scope_id"])
+                )
+                if same_scope and infer_model_family(str(existing.get("modelo", ""))) == family:
+                    current.pop(existing_key, None)
+        current[key] = entry
+        _write_registry(current)
+    return entry
 
 
 def get_active_model(

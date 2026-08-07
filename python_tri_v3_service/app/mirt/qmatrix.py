@@ -47,9 +47,19 @@ def validate_qmatrix(qmatrix: MIRTQMatrix, *, allow_template: bool = True) -> MI
 
     if len(factor_ids) != len(factor_id_set):
         raise ValueError("Há fatores duplicados na Q-matrix.")
+    for factor in qmatrix.factors:
+        if factor.area is not None and factor.area != qmatrix.area:
+            raise ValueError(
+                f"Fator {factor.factor_id} pertence à área {factor.area}, não {qmatrix.area}."
+            )
 
     row_ids: set[str] = set()
+    used_factor_ids: set[str] = set()
     for row in qmatrix.rows:
+        if row.area != qmatrix.area:
+            raise ValueError(
+                f"Item {row.item_id} pertence à área {row.area}, não {qmatrix.area}."
+            )
         if row.item_id in row_ids:
             raise ValueError(f"Item duplicado na Q-matrix: {row.item_id}")
         row_ids.add(row.item_id)
@@ -61,6 +71,7 @@ def validate_qmatrix(qmatrix: MIRTQMatrix, *, allow_template: bool = True) -> MI
             )
 
         active_loads = [fid for fid, carga in row.cargas.items() if int(carga) == 1]
+        used_factor_ids.update(active_loads)
         if not qmatrix.is_template and not active_loads:
             raise ValueError(
                 f"Item {row.item_id} não carrega nenhum fator na Q-matrix."
@@ -71,6 +82,12 @@ def validate_qmatrix(qmatrix: MIRTQMatrix, *, allow_template: bool = True) -> MI
 
     if not factor_ids:
         raise ValueError("Q-matrix real precisa declarar ao menos um fator.")
+    unused_factor_ids = sorted(factor_id_set - used_factor_ids)
+    if unused_factor_ids:
+        raise ValueError(
+            "Fatores declarados sem nenhum item associado: "
+            + ", ".join(unused_factor_ids)
+        )
 
     return qmatrix
 
@@ -238,10 +255,14 @@ def build_model_spec_from_qmatrix(
 
     validate_qmatrix(qmatrix, allow_template=qmatrix.is_template)
 
+    declared_factor_ids = {factor.factor_id for factor in qmatrix.factors}
+    if not qmatrix.is_template and scoring_factor_id not in declared_factor_ids:
+        raise ValueError("`scoring_factor_id` precisa apontar para um fator declarado.")
+
     if family == "bifactor":
         general_factors = [factor for factor in qmatrix.factors if factor.kind == "geral"]
-        if not qmatrix.is_template and not general_factors:
-            raise ValueError("Modelo bifactor exige ao menos um fator geral declarado.")
+        if not qmatrix.is_template and len(general_factors) != 1:
+            raise ValueError("Modelo bifactor exige exatamente um fator geral declarado.")
         if not qmatrix.is_template and scoring_factor_id not in {
             factor.factor_id for factor in general_factors
         }:

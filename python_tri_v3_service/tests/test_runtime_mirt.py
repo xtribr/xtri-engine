@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.mirt.qmatrix import build_habilidade_qmatrix, build_model_spec_from_qma
 from app.mirt.runner import build_mirt_output_dir
 from app.runtime.mirt import (
     RuntimeMIRTArtifactAmbiguousError,
+    RuntimeMIRTArtifactError,
     RuntimeMIRTArtifactNotFoundError,
     resolve_mirt_artifact,
 )
@@ -41,7 +43,16 @@ def _save_active_mirt_artifact(
     (artifact_dir / "model.rds").write_text("placeholder", encoding="utf-8")
     (artifact_dir / "item_params.json").write_text("[]", encoding="utf-8")
     (artifact_dir / "factor_scores.csv").write_text("student_id,G,SE_G\ns1,0.2,0.1\n", encoding="utf-8")
-    (artifact_dir / "fit_summary.json").write_text("{}", encoding="utf-8")
+    (artifact_dir / "fit_summary.json").write_text(
+        json.dumps(
+            {
+                "model_id": model.model_id,
+                "family": model.family,
+                "qmatrix_version": model.qmatrix_version,
+            }
+        ),
+        encoding="utf-8",
+    )
     (artifact_dir / "diagnostics.json").write_text("{}", encoding="utf-8")
     (artifact_dir / "qmatrix_snapshot.json").write_text(
         qmatrix.model_dump_json(indent=2),
@@ -147,4 +158,42 @@ class TestResolveMIRTArtifact:
             resolve_mirt_artifact(
                 ano_referencia=2099,
                 area="MT",
+            )
+
+    @pytest.mark.unit
+    def test_rejeita_familia_adulterada_no_fit_summary(self, temp_model_storage):
+        artifact = _save_active_mirt_artifact(
+            simulado_id="sim_mirt_summary",
+            area="MT",
+            register_active=False,
+        )
+        summary_path = Path(artifact["artifact_dir"]) / "fit_summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        summary["family"] = "compensatorio"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+
+        with pytest.raises(RuntimeMIRTArtifactError, match="fit_summary"):
+            resolve_mirt_artifact(
+                ano_referencia=2024,
+                area="MT",
+                artifact_id=artifact["artifact_id"],
+            )
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("filename", ["worker_output.json", "qmatrix_snapshot.json", "fit_summary.json"])
+    def test_normaliza_json_corrompido_como_erro_de_artefato(
+        self, temp_model_storage, filename: str
+    ):
+        artifact = _save_active_mirt_artifact(
+            simulado_id=f"sim_corrupt_{filename.split('.')[0]}",
+            area="MT",
+            register_active=False,
+        )
+        (Path(artifact["artifact_dir"]) / filename).write_text("{", encoding="utf-8")
+
+        with pytest.raises(RuntimeMIRTArtifactError, match="inválido"):
+            resolve_mirt_artifact(
+                ano_referencia=2024,
+                area="MT",
+                artifact_id=artifact["artifact_id"],
             )

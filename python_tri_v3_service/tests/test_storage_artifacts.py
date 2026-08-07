@@ -183,6 +183,42 @@ class TestUnidimArtifacts:
         assert scope_models[0]["artifact_id"] == "job_mirt_001"
 
     @pytest.mark.unit
+    def test_registry_substitui_mirt_anterior_da_mesma_familia(self, temp_storage_root):
+        base_manifest = {
+            "artifact_dir": str(temp_storage_root / "models" / "mirt"),
+            "simulado_id": "simulado_exclusivo",
+            "scope_type": "simulado_id",
+            "scope_id": "simulado_exclusivo",
+            "ano_referencia": 2024,
+            "area": "MT",
+            "saved_at_utc": "2026-08-07T12:00:00+00:00",
+        }
+        set_active_model(
+            {
+                **base_manifest,
+                "artifact_id": "mirt_v1",
+                "modelo": "mirt_bifactor_mt_1.0.0",
+            },
+            exclusive_family=True,
+        )
+        set_active_model(
+            {
+                **base_manifest,
+                "artifact_id": "mirt_v2",
+                "modelo": "mirt_bifactor_mt_2.0.0",
+            },
+            exclusive_family=True,
+        )
+
+        active = list_active_models_by_scope(
+            ano_referencia=2024,
+            area="MT",
+            scope_id="simulado_exclusivo",
+            family="mirt",
+        )
+        assert [entry["artifact_id"] for entry in active] == ["mirt_v2"]
+
+    @pytest.mark.unit
     def test_artifact_dir_is_versioned_by_scope(self, temp_storage_root):
         artifact_dir = artifact_dir_for(
             ano_referencia=2024,

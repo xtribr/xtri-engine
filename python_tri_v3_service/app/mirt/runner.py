@@ -11,9 +11,13 @@ Responsabilidades deste módulo:
 from __future__ import annotations
 
 import json
+from functools import lru_cache
+import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
+import threading
 from typing import Optional, Union
 
 import pandas as pd
@@ -24,6 +28,13 @@ from .qmatrix import qmatrix_to_binary_rows, validate_qmatrix
 
 DEFAULT_RSCRIPT_BIN = "Rscript"
 DEFAULT_FIT_TIMEOUT_S = 60 * 60
+DEFAULT_SCORE_TIMEOUT_S = max(
+    30, int(os.getenv("XTRI_MIRT_SCORE_TIMEOUT_SECONDS", "300"))
+)
+MAX_CONCURRENT_SCORING = max(
+    1, int(os.getenv("XTRI_MIRT_MAX_SCORING_PROCESSES", "2"))
+)
+_score_slots = threading.BoundedSemaphore(MAX_CONCURRENT_SCORING)
 MIRT_FIT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "mirt_fit.R"
 MIRT_SCORE_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "mirt_score.R"
 WORKER_INPUT_FILENAME = "worker_input.json"
@@ -31,6 +42,7 @@ WORKER_OUTPUT_FILENAME = "worker_output.json"
 QMATRIX_JSON_FILENAME = "qmatrix.json"
 QMATRIX_TABLE_FILENAME = "qmatrix_table.csv"
 RESPONSE_MATRIX_CSV_FILENAME = "response_matrix.csv"
+SAFE_PATH_PART = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
 class MIRTWorkerError(RuntimeError):
@@ -41,10 +53,36 @@ class MIRTWorkerExecutionError(MIRTWorkerError):
     """Falha ao executar o worker R."""
 
 
-def mirt_runtime_available(*, rscript_bin: str = DEFAULT_RSCRIPT_BIN) -> bool:
-    """Indica se há `Rscript` disponível no ambiente atual."""
+class MIRTWorkerBusyError(MIRTWorkerError):
+    """Todos os slots configurados de scoring R estão ocupados."""
 
-    return shutil.which(rscript_bin) is not None
+
+@lru_cache(maxsize=4)
+def mirt_runtime_available(*, rscript_bin: str = DEFAULT_RSCRIPT_BIN) -> bool:
+    """Indica se `Rscript`, `jsonlite` e `mirt` estão disponíveis."""
+
+    executable = shutil.which(rscript_bin)
+    if executable is None:
+        return False
+    try:
+        completed = subprocess.run(
+            [
+                executable,
+                "--vanilla",
+                "-e",
+                (
+                    "quit(status=ifelse(requireNamespace('jsonlite', quietly=TRUE) && "
+                    "requireNamespace('mirt', quietly=TRUE), 0, 1))"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0
 
 
 def ensure_mirt_scripts() -> None:
@@ -66,7 +104,17 @@ def build_mirt_output_dir(
     """Resolve o diretório versionado do job MIRT."""
 
     root = Path(base_dir) if base_dir is not None else MIRT_MODELS_ROOT
-    output_dir = root / str(year) / area.upper() / model_id / job_id
+    normalized_area = area.upper()
+    if normalized_area not in {"LC", "CH", "CN", "MT"}:
+        raise MIRTWorkerError(f"Área inválida para artefato MIRT: {area}")
+    for field_name, value in (("model_id", model_id), ("job_id", job_id)):
+        if not SAFE_PATH_PART.fullmatch(str(value)):
+            raise MIRTWorkerError(f"{field_name} inválido para o filesystem")
+
+    root = root.resolve()
+    output_dir = (root / str(int(year)) / normalized_area / model_id / job_id).resolve()
+    if not output_dir.is_relative_to(root):
+        raise MIRTWorkerError("Diretório do artefato MIRT escaparia da raiz configurada")
     output_dir.mkdir(parents=True, exist_ok=True)
     return output_dir
 
@@ -112,6 +160,10 @@ def _validate_response_matrix(
         )
 
     ordered = normalized[[student_id_column] + item_ids].copy()
+    student_ids = ordered[student_id_column].astype(str)
+    if student_ids.duplicated().any():
+        duplicated = student_ids[student_ids.duplicated()].iloc[0]
+        raise MIRTWorkerError(f"student_id duplicado na matriz de resposta: {duplicated}")
     for item_id in item_ids:
         series = ordered[item_id]
         invalid = series[~series.isin([0, 1]) & series.notna()]
@@ -119,9 +171,12 @@ def _validate_response_matrix(
             raise MIRTWorkerError(
                 f"A coluna {item_id} contém valores fora do domínio binário 0/1."
             )
-        ordered[item_id] = series.fillna(0).astype(int)
+        if series.isna().all():
+            raise MIRTWorkerError(f"A coluna {item_id} está ausente para toda a coorte.")
+        # `mirt` entende NA. Manter o vazio evita transformar prova ausente em erro.
+        ordered[item_id] = series.astype("Int64")
 
-    ordered[student_id_column] = ordered[student_id_column].astype(str)
+    ordered[student_id_column] = student_ids
     return item_ids, ordered
 
 
@@ -209,13 +264,22 @@ def _run_subprocess(
 ) -> subprocess.CompletedProcess[str]:
     """Executa um subprocesso com captura de saída textual."""
 
-    return subprocess.run(
-        command,
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout_s,
-    )
+    try:
+        return subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise MIRTWorkerExecutionError(
+            f"Worker MIRT excedeu o limite de {timeout_s} segundos"
+        ) from exc
+    except OSError as exc:
+        raise MIRTWorkerExecutionError(
+            f"Não foi possível iniciar o worker MIRT: {exc}"
+        ) from exc
 
 
 def run_mirt_fit(
@@ -239,7 +303,7 @@ def run_mirt_fit(
         input_path.write_text(worker_input.model_dump_json(indent=2), encoding="utf-8")
 
     completed = _run_subprocess(
-        command=[rscript_bin, str(MIRT_FIT_SCRIPT), str(input_path)],
+        command=[rscript_bin, "--vanilla", str(MIRT_FIT_SCRIPT), str(input_path)],
         timeout_s=timeout_s,
     )
     if completed.returncode != 0:
@@ -264,8 +328,9 @@ def run_mirt_score(
     model_rds_path: Union[str, Path],
     response_matrix_path: Union[str, Path],
     output_path: Union[str, Path],
+    qmatrix_path: Optional[Union[str, Path]] = None,
     rscript_bin: str = DEFAULT_RSCRIPT_BIN,
-    timeout_s: int = DEFAULT_FIT_TIMEOUT_S,
+    timeout_s: int = DEFAULT_SCORE_TIMEOUT_S,
 ) -> Path:
     """
     Executa o script de scoring MIRT sobre uma matriz de respostas já pronta em CSV.
@@ -282,16 +347,31 @@ def run_mirt_score(
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    completed = _run_subprocess(
-        command=[
-            rscript_bin,
-            str(MIRT_SCORE_SCRIPT),
-            str(model_rds_path),
-            str(response_matrix_path),
-            str(output_path),
-        ],
-        timeout_s=timeout_s,
-    )
+    command = [
+        rscript_bin,
+        "--vanilla",
+        str(MIRT_SCORE_SCRIPT),
+        str(model_rds_path),
+        str(response_matrix_path),
+        str(output_path),
+    ]
+    if qmatrix_path is not None:
+        qmatrix_path = Path(qmatrix_path)
+        if not qmatrix_path.is_file():
+            raise MIRTWorkerExecutionError(f"Q-matrix não encontrada: {qmatrix_path}")
+        command.append(str(qmatrix_path))
+
+    if not _score_slots.acquire(blocking=False):
+        raise MIRTWorkerBusyError(
+            f"Limite de {MAX_CONCURRENT_SCORING} processos de scoring MIRT atingido"
+        )
+    try:
+        completed = _run_subprocess(
+            command=command,
+            timeout_s=timeout_s,
+        )
+    finally:
+        _score_slots.release()
     if completed.returncode != 0:
         stderr = (completed.stderr or "").strip()
         stdout = (completed.stdout or "").strip()

@@ -12,6 +12,7 @@ Não executa calibração; apenas descreve de forma tipada:
 
 from __future__ import annotations
 
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
@@ -25,6 +26,59 @@ VALID_INITIAL_STRUCTURES = {
     "g_2_fatores",
     "g_3_fatores",
 }
+SAFE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+SAFE_FACTOR_ID_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+MIRT_RESERVED_FACTOR_IDS = {
+    "constrain",
+    "constrainb",
+    "cov",
+    "fixed",
+    "free",
+    "lbound",
+    "mean",
+    "nexplore",
+    "prior",
+    "start",
+    "ubound",
+}
+
+
+def _validate_safe_id(value: str, *, field_name: str) -> str:
+    value = value.strip()
+    if not SAFE_ID_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{field_name} deve usar apenas letras, números, ponto, hífen ou underscore"
+        )
+    return value
+
+
+def validate_mirt_factor_id(value: str, *, field_name: str = "factor_id") -> str:
+    """Valida nomes de fatores sem colisão com as colunas do worker."""
+
+    value = value.strip()
+    if not SAFE_FACTOR_ID_PATTERN.fullmatch(value):
+        raise ValueError(
+            f"{field_name} deve começar com letra e usar apenas letras, números ou underscore"
+        )
+    normalized = value.casefold()
+    if (
+        normalized == "student_id"
+        or normalized.startswith("se_")
+        or normalized in MIRT_RESERVED_FACTOR_IDS
+    ):
+        raise ValueError(
+            f"{field_name} usa um nome reservado pelo contrato/worker MIRT"
+        )
+    return value
+
+
+def validate_mirt_item_id(value: str) -> str:
+    """Valida o ID do item e reserva a coluna de identidade do aluno."""
+
+    value = _validate_safe_id(value, field_name="item_id")
+    if value.casefold() == "student_id":
+        raise ValueError("item_id não pode ser student_id")
+    return value
 
 
 class MIRTFactorSpec(BaseModel):
@@ -57,6 +111,11 @@ class MIRTFactorSpec(BaseModel):
             raise ValueError("Campo textual não pode ser vazio.")
         return value
 
+    @field_validator("factor_id")
+    @classmethod
+    def _validate_factor_id(cls, value: str) -> str:
+        return validate_mirt_factor_id(value)
+
     @field_validator("area")
     @classmethod
     def _normalize_area(cls, value: Optional[str]) -> Optional[str]:
@@ -88,10 +147,7 @@ class MIRTQMatrixRow(BaseModel):
     @field_validator("item_id")
     @classmethod
     def _validate_item_id(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("item_id não pode ser vazio.")
-        return value
+        return validate_mirt_item_id(value)
 
     @field_validator("area")
     @classmethod
@@ -101,15 +157,19 @@ class MIRTQMatrixRow(BaseModel):
             raise ValueError(f"Área inválida para MIRT: {value}")
         return value
 
-    @field_validator("cargas")
+    @field_validator("cargas", mode="before")
     @classmethod
-    def _validate_cargas(cls, value: Dict[str, int]) -> Dict[str, int]:
+    def _validate_cargas(cls, value: Any) -> Dict[str, int]:
+        if not isinstance(value, dict):
+            raise ValueError("cargas deve ser um objeto factor_id -> 0/1")
         normalized: Dict[str, int] = {}
         for factor_id, carga in value.items():
-            fid = factor_id.strip()
-            if not fid:
-                raise ValueError("factor_id em `cargas` não pode ser vazio.")
-            normalized[fid] = 1 if int(carga) else 0
+            fid = validate_mirt_factor_id(
+                str(factor_id), field_name="factor_id em cargas"
+            )
+            if type(carga) is not int or carga not in (0, 1):
+                raise ValueError("cargas aceita somente os inteiros 0 ou 1")
+            normalized[fid] = carga
         return normalized
 
 
@@ -142,10 +202,7 @@ class MIRTQMatrix(BaseModel):
     @field_validator("version")
     @classmethod
     def _validate_version(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("A versão da Q-matrix não pode ser vazia.")
-        return value
+        return _validate_safe_id(value, field_name="version")
 
     @field_validator("area")
     @classmethod
@@ -188,13 +245,15 @@ class MIRTModelSpec(BaseModel):
         description="Campos auxiliares para auditoria do ajuste",
     )
 
-    @field_validator("model_id", "qmatrix_version", "scoring_factor_id")
+    @field_validator("model_id", "qmatrix_version")
     @classmethod
     def _validate_non_empty(cls, value: str) -> str:
-        value = value.strip()
-        if not value:
-            raise ValueError("Campo textual obrigatório não pode ser vazio.")
-        return value
+        return _validate_safe_id(value, field_name="identificador do modelo")
+
+    @field_validator("scoring_factor_id")
+    @classmethod
+    def _validate_scoring_factor_id(cls, value: str) -> str:
+        return validate_mirt_factor_id(value, field_name="scoring_factor_id")
 
     @field_validator("area")
     @classmethod
