@@ -1,211 +1,331 @@
-ano,questao,componente,area,gabarito
-6,1,Ciências Naturais,CN,C
-6,2,Ciências Naturais,CN,A
-6,3,Ciências Naturais,CN,D
-6,4,Ciências Naturais,CN,A
-6,5,Ciências Naturais,CN,B
-6,6,Matemática,MT,C
-6,7,Matemática,MT,B
-6,8,Matemática,MT,A
-6,9,Matemática,MT,C
-6,10,Matemática,MT,D
-6,11,Matemática,MT,A
-6,12,Matemática,MT,D
-6,13,Matemática,MT,B
-6,14,Matemática,MT,B
-6,15,Matemática,MT,C
-6,16,História,CH,C
-6,17,História,CH,D
-6,18,História,CH,D
-6,19,História,CH,A
-6,20,História,CH,D
-6,21,Geografia,CH,B
-6,22,Geografia,CH,D
-6,23,Geografia,CH,A
-6,24,Geografia,CH,D
-6,25,Geografia,CH,A
-6,26,Língua Portuguesa,LC,C
-6,27,Língua Portuguesa,LC,D
-6,28,Língua Portuguesa,LC,D
-6,29,Língua Portuguesa,LC,D
-6,30,Língua Portuguesa,LC,A
-6,31,Língua Portuguesa,LC,B
-6,32,Língua Portuguesa,LC,B
-6,33,Língua Portuguesa,LC,C
-6,34,Língua Portuguesa,LC,B
-6,35,Língua Portuguesa,LC,A
-6,36,Inglês,LC,B
-6,37,Inglês,LC,C
-6,38,Inglês,LC,A
-6,39,Inglês,LC,A
-6,40,Inglês,LC,C
-6,41,Arte,LC,C
-6,42,Arte,LC,D
-6,43,Arte,LC,B
-6,44,Arte,LC,C
-6,45,Arte,LC,A
-6,46,Filosofia,CH,B
-6,47,Filosofia,CH,C
-6,48,Filosofia,CH,B
-6,49,Filosofia,CH,D
-6,50,Filosofia,CH,C
-7,1,Ciências Naturais,CN,B
-7,2,Ciências Naturais,CN,D
-7,3,Ciências Naturais,CN,B
-7,4,Ciências Naturais,CN,B
-7,5,Ciências Naturais,CN,A
-7,6,Matemática,MT,C
-7,7,Matemática,MT,C
-7,8,Matemática,MT,B
-7,9,Matemática,MT,A
-7,10,Matemática,MT,B
-7,11,Matemática,MT,A
-7,12,Matemática,MT,B
-7,13,Matemática,MT,B
-7,14,Matemática,MT,C
-7,15,Matemática,MT,D
-7,16,História,CH,C
-7,17,História,CH,C
-7,18,História,CH,C
-7,19,História,CH,C
-7,20,História,CH,B
-7,21,Geografia,CH,B
-7,22,Geografia,CH,D
-7,23,Geografia,CH,A
-7,24,Geografia,CH,C
-7,25,Geografia,CH,D
-7,26,Língua Portuguesa,LC,C
-7,27,Língua Portuguesa,LC,D
-7,28,Língua Portuguesa,LC,B
-7,29,Língua Portuguesa,LC,C
-7,30,Língua Portuguesa,LC,D
-7,31,Língua Portuguesa,LC,B
-7,32,Língua Portuguesa,LC,D
-7,33,Língua Portuguesa,LC,D
-7,34,Língua Portuguesa,LC,C
-7,35,Língua Portuguesa,LC,A
-7,36,Língua Inglesa,LC,A
-7,37,Língua Inglesa,LC,B
-7,38,Língua Inglesa,LC,C
-7,39,Língua Inglesa,LC,B
-7,40,Língua Inglesa,LC,C
-7,41,Arte,LC,C
-7,42,Arte,LC,B
-7,43,Arte,LC,D
-7,44,Arte,LC,B
-7,45,Arte,LC,A
-7,46,Filosofia,CH,A
-7,47,Filosofia,CH,D
-7,48,Filosofia,CH,B
-7,49,Filosofia,CH,C
-7,50,Filosofia,CH,A
-8,1,Ciências Naturais,CN,C
-8,2,Ciências Naturais,CN,A
-8,3,Ciências Naturais,CN,B
-8,4,Ciências Naturais,CN,A
-8,5,Ciências Naturais,CN,B
-8,6,Matemática,MT,D
-8,7,Matemática,MT,D
-8,8,Matemática,MT,A
-8,9,Matemática,MT,C
-8,10,Matemática,MT,B
-8,11,Matemática,MT,D
-8,12,Matemática,MT,C
-8,13,Matemática,MT,D
-8,14,Matemática,MT,C
-8,15,Matemática,MT,C
-8,16,História,CH,B
-8,17,História,CH,C
-8,18,História,CH,B
-8,19,História,CH,A
-8,20,História,CH,D
-8,21,Geografia,CH,A
-8,22,Geografia,CH,C
-8,23,Geografia,CH,B
-8,24,Geografia,CH,D
-8,25,Geografia,CH,D
-8,26,Língua Portuguesa,LC,B
-8,27,Língua Portuguesa,LC,C
-8,28,Língua Portuguesa,LC,C
-8,29,Língua Portuguesa,LC,D
-8,30,Língua Portuguesa,LC,D
-8,31,Língua Portuguesa,LC,A
-8,32,Língua Portuguesa,LC,C
-8,33,Língua Portuguesa,LC,C
-8,34,Língua Portuguesa,LC,B
-8,35,Língua Portuguesa,LC,A
-8,36,Língua Inglesa,LC,B
-8,37,Língua Inglesa,LC,D
-8,38,Língua Inglesa,LC,A
-8,39,Língua Inglesa,LC,C
-8,40,Língua Inglesa,LC,D
-8,41,Arte,LC,D
-8,42,Arte,LC,C
-8,43,Arte,LC,A
-8,44,Arte,LC,B
-8,45,Arte,LC,A
-8,46,Filosofia,CH,B
-8,47,Filosofia,CH,C
-8,48,Filosofia,CH,D
-8,49,Filosofia,CH,D
-8,50,Filosofia,CH,B
-9,1,Biologia,CN,D
-9,2,Biologia,CN,A
-9,3,Biologia,CN,B
-9,4,Biologia,CN,C
-9,5,Biologia,CN,C
-9,6,Química,CN,D
-9,7,Química,CN,B
-9,8,Química,CN,D
-9,9,Química,CN,B
-9,10,Química,CN,B
-9,11,Física,CN,A
-9,12,Física,CN,A
-9,13,Física,CN,B
-9,14,Física,CN,D
-9,15,Física,CN,A
-9,16,Matemática,MT,C
-9,17,Matemática,MT,C
-9,18,Matemática,MT,A
-9,19,Matemática,MT,D
-9,20,Matemática,MT,C
-9,21,Matemática,MT,A
-9,22,Matemática,MT,D
-9,23,Matemática,MT,B
-9,24,Matemática,MT,B
-9,25,Matemática,MT,C
-9,26,História,CH,B
-9,27,História,CH,D
-9,28,História,CH,B
-9,29,História,CH,C
-9,30,História,CH,A
-9,31,Geografia,CH,D
-9,32,Geografia,CH,B
-9,33,Geografia,CH,A
-9,34,Geografia,CH,A
-9,35,Geografia,CH,A
-9,36,Língua Portuguesa,LC,D
-9,37,Língua Portuguesa,LC,B
-9,38,Língua Portuguesa,LC,D
-9,39,Língua Portuguesa,LC,B
-9,40,Língua Portuguesa,LC,A
-9,41,Língua Portuguesa,LC,C
-9,42,Língua Portuguesa,LC,A
-9,43,Língua Portuguesa,LC,D
-9,44,Língua Portuguesa,LC,B
-9,45,Língua Portuguesa,LC,A
-9,46,Língua Inglesa,LC,B
-9,47,Língua Inglesa,LC,B
-9,48,Língua Inglesa,LC,A
-9,49,Língua Inglesa,LC,C
-9,50,Língua Inglesa,LC,B
-9,51,Arte,LC,A
-9,52,Arte,LC,A
-9,53,Arte,LC,D
-9,54,Arte,LC,A
-9,55,Arte,LC,B
-9,56,Filosofia,CH,D
-9,57,Filosofia,CH,A
-9,58,Filosofia,CH,D
-9,59,Filosofia,CH,B
-9,60,Filosofia,CH,C
+bloco,nivel,questao,componente,area,alternativas,gabarito,escopo_correcao,fonte
+EF,6o ano,1,Ciências Naturais,CN,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,2,Ciências Naturais,CN,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,3,Ciências Naturais,CN,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,4,Ciências Naturais,CN,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,5,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,6,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,7,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,8,Matemática,MT,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,9,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,10,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,11,Matemática,MT,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,12,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,13,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,14,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,15,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,16,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,17,História,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,18,História,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,19,História,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,20,História,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,21,Geografia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,22,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,23,Geografia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,24,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,25,Geografia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,26,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,27,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,28,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,29,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,30,Língua Portuguesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,31,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,32,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,33,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,34,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,35,Língua Portuguesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,36,Inglês,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,37,Inglês,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,38,Inglês,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,39,Inglês,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,40,Inglês,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,41,Arte,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,42,Arte,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,43,Arte,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,44,Arte,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,45,Arte,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,46,Filosofia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,47,Filosofia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,48,Filosofia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,49,Filosofia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,6o ano,50,Filosofia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,1,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,2,Ciências Naturais,CN,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,3,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,4,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,5,Ciências Naturais,CN,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,6,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,7,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,8,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,9,Matemática,MT,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,10,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,11,Matemática,MT,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,12,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,13,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,14,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,15,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,16,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,17,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,18,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,19,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,20,História,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,21,Geografia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,22,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,23,Geografia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,24,Geografia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,25,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,26,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,27,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,28,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,29,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,30,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,31,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,32,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,33,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,34,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,35,Língua Portuguesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,36,Língua Inglesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,37,Língua Inglesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,38,Língua Inglesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,39,Língua Inglesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,40,Língua Inglesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,41,Arte,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,42,Arte,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,43,Arte,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,44,Arte,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,45,Arte,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,46,Filosofia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,47,Filosofia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,48,Filosofia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,49,Filosofia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,7o ano,50,Filosofia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,1,Ciências Naturais,CN,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,2,Ciências Naturais,CN,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,3,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,4,Ciências Naturais,CN,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,5,Ciências Naturais,CN,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,6,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,7,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,8,Matemática,MT,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,9,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,10,Matemática,MT,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,11,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,12,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,13,Matemática,MT,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,14,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,15,Matemática,MT,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,16,História,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,17,História,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,18,História,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,19,História,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,20,História,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,21,Geografia,CH,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,22,Geografia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,23,Geografia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,24,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,25,Geografia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,26,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,27,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,28,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,29,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,30,Língua Portuguesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,31,Língua Portuguesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,32,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,33,Língua Portuguesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,34,Língua Portuguesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,35,Língua Portuguesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,36,Língua Inglesa,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,37,Língua Inglesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,38,Língua Inglesa,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,39,Língua Inglesa,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,40,Língua Inglesa,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,41,Arte,LC,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,42,Arte,LC,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,43,Arte,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,44,Arte,LC,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,45,Arte,LC,4,A,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,46,Filosofia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,47,Filosofia,CH,4,C,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,48,Filosofia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,49,Filosofia,CH,4,D,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,8o ano,50,Filosofia,CH,4,B,sim,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,1,Biologia,CN,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,2,Biologia,CN,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,3,Biologia,CN,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,4,Biologia,CN,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,5,Biologia,CN,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,6,Química,CN,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,7,Química,CN,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,8,Química,CN,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,9,Química,CN,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,10,Química,CN,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,11,Física,CN,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,12,Física,CN,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,13,Física,CN,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,14,Física,CN,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,15,Física,CN,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,16,Matemática,MT,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,17,Matemática,MT,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,18,Matemática,MT,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,19,Matemática,MT,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,20,Matemática,MT,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,21,Matemática,MT,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,22,Matemática,MT,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,23,Matemática,MT,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,24,Matemática,MT,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,25,Matemática,MT,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,26,História,CH,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,27,História,CH,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,28,História,CH,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,29,História,CH,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,30,História,CH,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,31,Geografia,CH,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,32,Geografia,CH,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,33,Geografia,CH,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,34,Geografia,CH,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,35,Geografia,CH,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,36,Língua Portuguesa,LC,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,37,Língua Portuguesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,38,Língua Portuguesa,LC,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,39,Língua Portuguesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,40,Língua Portuguesa,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,41,Língua Portuguesa,LC,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,42,Língua Portuguesa,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,43,Língua Portuguesa,LC,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,44,Língua Portuguesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,45,Língua Portuguesa,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,46,Língua Inglesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,47,Língua Inglesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,48,Língua Inglesa,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,49,Língua Inglesa,LC,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,50,Língua Inglesa,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,51,Arte,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,52,Arte,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,53,Arte,LC,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,54,Arte,LC,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,55,Arte,LC,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,56,Filosofia,CH,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,57,Filosofia,CH,4,A,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,58,Filosofia,CH,4,D,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,59,Filosofia,CH,4,B,nao,Mentoria Marista — Caderno ENEM (.docx)
+EF,9o ano,60,Filosofia,CH,4,C,nao,Mentoria Marista — Caderno ENEM (.docx)
+EM,1a serie,1,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,2,Língua Portuguesa,LC,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,3,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,4,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,5,Língua Portuguesa,LC,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,6,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,7,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,8,Língua Portuguesa,LC,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,9,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,10,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,11,Língua Portuguesa,LC,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,12,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,13,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,14,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,15,Língua Portuguesa,LC,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,16,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,17,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,18,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,19,Matemática,MT,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,20,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,21,Matemática,MT,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,22,Matemática,MT,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,23,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,24,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,25,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,26,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,27,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,28,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,29,Matemática,MT,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,30,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,31,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,32,Biologia/Física/Química,CN,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,33,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,34,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,35,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,36,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,37,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,38,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,39,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,40,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,41,Biologia/Física/Química,CN,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,42,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,43,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,44,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,45,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,46,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,47,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,48,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,49,História/Geografia,CH,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,50,História/Geografia,CH,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,51,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,52,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,53,História/Geografia,CH,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,54,História/Geografia,CH,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,55,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,56,História/Geografia,CH,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,57,História/Geografia,CH,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,58,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,59,História/Geografia,CH,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,1a serie,60,História/Geografia,CH,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,1,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,2,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,3,Língua Portuguesa,LC,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,4,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,5,Língua Portuguesa,LC,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,6,Língua Portuguesa,LC,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,7,Língua Portuguesa,LC,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,8,Língua Portuguesa,LC,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,9,Língua Portuguesa,LC,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,10,Língua Portuguesa,LC,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,11,Língua Portuguesa,LC,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,12,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,13,Língua Portuguesa,LC,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,14,Língua Portuguesa,LC,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,15,Língua Portuguesa,LC,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,16,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,17,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,18,Matemática,MT,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,19,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,20,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,21,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,22,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,23,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,24,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,25,Matemática,MT,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,26,Matemática,MT,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,27,Matemática,MT,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,28,Matemática,MT,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,29,Matemática,MT,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,30,Matemática,MT,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,31,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,32,Biologia/Física/Química,CN,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,33,Biologia/Física/Química,CN,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,34,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,35,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,36,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,37,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,38,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,39,Biologia/Física/Química,CN,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,40,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,41,Biologia/Física/Química,CN,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,42,Biologia/Física/Química,CN,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,43,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,44,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,45,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,46,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,47,Biologia/Física/Química,CN,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,48,Biologia/Física/Química,CN,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,49,História/Geografia,CH,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,50,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,51,História/Geografia,CH,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,52,História/Geografia,CH,5,D,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,53,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,54,História/Geografia,CH,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,55,História/Geografia,CH,5,B,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,56,História/Geografia,CH,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,57,História/Geografia,CH,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,58,História/Geografia,CH,5,E,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,59,História/Geografia,CH,5,C,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
+EM,2a serie,60,História/Geografia,CH,5,A,sim,GABARITO LETRAS (PDF) + faixas do Caderno de Prova
