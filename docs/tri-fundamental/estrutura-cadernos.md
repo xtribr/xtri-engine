@@ -134,7 +134,71 @@ Pontos a confirmar nos cartões:
 - [ ] Parametrizar o `c` por número de alternativas no motor
 - [ ] Decidir a saída: nota por área e/ou nota geral pelo total bruto
 
-## 7. Histórico de aplicações
+## 7. Motor de correção
+
+Código em `python_tri_v3_service/app/marista/`:
+
+| Módulo | Responsabilidade |
+|---|---|
+| `estrutura.py` | Carrega o mapa de itens (`app/referencias/marista_mapa_itens.csv`), monta a prova de cada nível e valida numeração, área e gabarito |
+| `referencia.py` | Gera o envelope por área pelo método documentado na planilha de Fundamental II |
+| `respostas.py` | Lê as marcações dos estudantes e classifica em branco, marcação múltipla e letra inválida |
+| `correcao.py` | Conta acertos por área, ancora no envelope e calcula estatística de item |
+| `../scripts/corrigir_marista.py` | CLI |
+
+```bash
+cd python_tri_v3_service
+python -m app.scripts.corrigir_marista \
+    --bloco EM --nivel "1a serie" \
+    --respostas marcacoes_1a.csv \
+    --saida-alunos notas_1a.csv --saida-itens itens_1a.csv
+```
+
+O arquivo de marcações tem uma linha por estudante: colunas de identificação
+(`aluno_id`, `nome`, `turma`, `matricula`) e uma coluna por questão, com
+cabeçalho `1`…`60`, `q1`… ou `questao_1`…
+
+### Fórmula do envelope
+
+    p        = acertos / nº de itens
+    forma    = 4p(1 − p)
+    mediana  = 200 + 600 · (3p² − 2p³) + deslocamento · forma
+    amplitude = dispersão-base × ajuste da área × √(10 / nº de itens) × forma
+    mínimo, máximo = mediana ∓ amplitude        (tudo limitado a [200, 800])
+
+Reproduz a planilha `Tabela_Referencia_TRI_Fundamental_II_Provisoria.xlsx`:
+conferido contra as 440 linhas da aba "Base longa", **1734 dos 1760 valores
+batem exatamente**; os 26 restantes diferem 0,1 por arredondamento de fronteira
+`.x5` no Excel. Para o Ensino Médio os parâmetros usados são deslocamento 0 e
+ajuste de área 1 — cada série numa escala própria, porque escala vertical entre
+séries exige itens comuns e calibração conjunta, que não existem aqui.
+
+A tabela gerada para os dois blocos está em `tabela_referencia_marista.csv`
+(565 linhas), com a coluna `status = HIPOTESE_PRE_CALIBRACAO`.
+
+### O que o motor deliberadamente não faz
+
+- **Não estima parâmetros de item nem theta.** Com 12 a 38 estudantes por nível
+  e áreas de 12 a 20 itens, calibração 2PL/3PL não é identificável de forma
+  estável. A saída honesta é acerto bruto ancorado.
+- **Não posiciona o aluno dentro do envelope.** Isso exigiria calibração ou um
+  critério externo de dificuldade. A mediana é a estimativa central e
+  [mínimo, máximo] é a incerteza declarada, não enfeite.
+- **Não transforma item em branco em erro.** Branco, marcação múltipla e letra
+  inválida entram no relatório e rebaixam a confiabilidade do resultado daquela
+  área (`confiavel = nao`), com a razão escrita na coluna de observação.
+- **Não corrige nível fora de escopo.** Pedir a correção do 9º ano levanta erro.
+
+A estatística de item (taxa de acerto observada e ponto-bisserial) sai junto;
+a discriminação só é calculada com 30 estudantes ou mais, e abaixo disso a
+coluna vem vazia com a razão declarada.
+
+Cobertura: `tests/test_marista.py`, 25 testes — envelope conferido contra
+valores reais da planilha, composição por área dos dois blocos, contagem na
+área certa quando as faixas não são contíguas, tratamento de branco/múltipla/
+inválida e recusa do nível fora de escopo.
+
+## 8. Histórico de aplicações
 
 Nenhuma correção executada até 2026-09-18.
 
