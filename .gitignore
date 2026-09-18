@@ -25,3 +25,6 @@ tmp/
 
 # Staging local de microdados INEP 2025 (2.7 GB) — nunca commitar dados reais.
 /microdados-2025/
+
+# Credencial local do git (token) — nunca commitar
+.git-credentials-xtri
