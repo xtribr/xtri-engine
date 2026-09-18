@@ -12,6 +12,7 @@ import pytest
 
 from app.marista.correcao import corrigir, corrigir_aluno
 from app.marista.estrutura import obter_prova
+from app.marista.escala_oficial import adaptar, carregar_escala, tabelas_da_prova
 from app.marista.referencia import ParametrosEnvelope, faixa, tabela_por_area
 from app.marista.respostas import RespostaAluno, ler_respostas
 
@@ -217,7 +218,7 @@ def test_turma_pequena_avisa_e_nao_calcula_discriminacao():
     assert resultado.n_alunos == 3
     assert all(i.discriminacao is None for i in resultado.itens)
     assert any("amostra insuficiente" in a for a in resultado.avisos)
-    assert any("PROVISÓRIAS" in a for a in resultado.avisos)
+    assert any("não nota oficial do ENEM" in a for a in resultado.avisos)
 
 
 def test_estatistica_de_item_cobre_todos_os_itens():
@@ -226,3 +227,76 @@ def test_estatistica_de_item_cobre_todos_os_itens():
     assert len(resultado.itens) == 60
     assert {i.area for i in resultado.itens} == {"LC", "MT", "CH", "CN"}
     assert all(i.taxa_acerto == 1.0 for i in resultado.itens)
+
+
+# --------------------------------------------------------------------------
+# Escala oficial do ENEM adaptada
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("area", ["LC", "CH", "CN", "MT"])
+def test_adaptacao_reproduz_a_tabela_oficial(area):
+    """Adaptar para o próprio nº de itens do ENEM devolve a tabela oficial."""
+    escala = carregar_escala(area, 2024)
+    faixas = adaptar(escala, escala.n_itens, alargar_envelope=False)
+    for ponto in escala.pontos:
+        f = faixas[ponto.acertos]
+        assert f.mediana == pytest.approx(ponto.mediana, abs=0.05)
+        assert f.minimo == pytest.approx(ponto.minimo, abs=0.05)
+        assert f.maximo == pytest.approx(ponto.maximo, abs=0.05)
+
+
+@pytest.mark.parametrize("n_itens", [5, 10, 12, 15, 18, 20])
+def test_extremos_da_area_sao_preservados(n_itens):
+    """Zero acerto e prova inteira caem nos extremos oficiais, qualquer que seja n."""
+    escala = carregar_escala("LC", 2024)
+    faixas = adaptar(escala, n_itens)
+    assert faixas[0].mediana == pytest.approx(escala.pontos[0].mediana, abs=0.05)
+    assert faixas[-1].mediana == pytest.approx(escala.pontos[-1].mediana, abs=0.05)
+
+
+def test_prova_curta_tem_envelope_mais_largo():
+    escala = carregar_escala("CN", 2024)
+    curta = adaptar(escala, 5)
+    longa = adaptar(escala, 18)
+    assert curta[2].amplitude > longa[9].amplitude
+
+
+def test_piso_da_area_e_o_menor_minimo_da_curva():
+    """Em 2024, MT tem pontos com mínimo abaixo do mínimo de zero acerto."""
+    mt = carregar_escala("MT", 2024)
+    assert mt.piso < mt.pontos[0].minimo
+    assert mt.piso == pytest.approx(min(p.minimo for p in mt.pontos))
+    lc = carregar_escala("LC", 2024)
+    assert lc.piso == pytest.approx(lc.pontos[0].minimo)
+
+
+def test_envelope_nao_ultrapassa_os_limites_da_area():
+    escala = carregar_escala("MT", 2024)
+    for f in adaptar(escala, 10):
+        assert f.minimo >= escala.piso - 0.05
+        assert f.maximo <= escala.teto + 0.05
+
+
+def test_ano_ou_area_inexistente():
+    with pytest.raises(KeyError):
+        carregar_escala("LC", 1998)
+    with pytest.raises(KeyError):
+        carregar_escala("XX", 2024)
+
+
+def test_correcao_ancora_na_escala_oficial_por_padrao():
+    prova = obter_prova("EM", "1a serie")
+    escalas = {a: carregar_escala(a, 2024) for a in prova.composicao}
+    resultado = corrigir([_resposta(prova, prova.gabarito)], prova)
+    aluno = resultado.alunos[0]
+    for area, escala in escalas.items():
+        assert aluno.por_area[area].nota_mediana == pytest.approx(escala.pontos[-1].mediana, abs=0.05)
+    assert any("ENEM 2024" in a for a in resultado.avisos)
+    assert any("não nota oficial do ENEM" in a for a in resultado.avisos)
+
+
+def test_tabelas_da_prova_cobre_areas_e_geral():
+    tabs = tabelas_da_prova({"LC": 15, "MT": 15, "CH": 12, "CN": 18}, 2024)
+    assert {a: len(t) - 1 for a, t in tabs.items()} == {
+        "LC": 15, "MT": 15, "CH": 12, "CN": 18, "GERAL": 60
+    }

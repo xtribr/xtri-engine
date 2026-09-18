@@ -27,6 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from statistics import mean, pstdev
 
+from app.marista.escala_oficial import ANO_PADRAO, tabelas_da_prova
 from app.marista.estrutura import Prova
 from app.marista.referencia import FaixaReferencia, ParametrosEnvelope, tabela_por_area
 from app.marista.respostas import RespostaAluno
@@ -216,10 +217,18 @@ def _ponto_bisserial(acertou: list[int], totais: list[int]) -> float | None:
 def corrigir(
     respostas: list[RespostaAluno],
     prova: Prova,
+    ano_referencia: int = ANO_PADRAO,
     parametros: ParametrosEnvelope | None = None,
+    tabelas: dict[str, list[FaixaReferencia]] | None = None,
     minimo_para_discriminacao: int = 30,
 ) -> ResultadoTurma:
-    """Corrige um conjunto de estudantes do mesmo nível."""
+    """Corrige um conjunto de estudantes do mesmo nível.
+
+    Por padrão ancora na escala oficial do ENEM do ``ano_referencia``, adaptada
+    ao número de itens de cada área. Passar ``parametros`` troca para a hipótese
+    pré-calibração de Fundamental II (curva sintética 200–800); ``tabelas``
+    permite injetar um envelope já pronto.
+    """
     if not prova.escopo_correcao:
         raise ValueError(
             f"{prova.bloco}/{prova.nivel} está marcado como fora do escopo de correção no mapa de itens"
@@ -227,8 +236,16 @@ def corrigir(
     if not respostas:
         raise ValueError("nenhuma resposta para corrigir")
 
-    params = parametros or ParametrosEnvelope()
-    tabelas = tabela_por_area(prova.composicao, params)
+    params = parametros
+    if tabelas is None:
+        if params is not None:
+            tabelas = tabela_por_area(prova.composicao, params)
+            origem = "hipótese pré-calibração (curva sintética 200–800)"
+        else:
+            tabelas = tabelas_da_prova(prova.composicao, ano_referencia)
+            origem = f"escala oficial do ENEM {ano_referencia}, adaptada por proporção de acertos"
+    else:
+        origem = "envelope fornecido pelo chamador"
     alunos = [corrigir_aluno(r, prova, tabelas) for r in respostas]
 
     totais = [a.geral.acertos for a in alunos]
@@ -264,8 +281,9 @@ def corrigir(
         )
 
     avisos: list[str] = [
-        "Notas PROVISÓRIAS: o envelope de referência é hipótese pré-calibração, "
-        "não resultado empírico calibrado."
+        f"Ancoragem: {origem}.",
+        "Nota PEDAGÓGICA, não nota oficial do ENEM: os itens desta prova não foram "
+        "calibrados e a escala foi adaptada de outra quantidade de itens.",
     ]
     if len(alunos) < 100:
         avisos.append(
@@ -283,7 +301,7 @@ def corrigir(
         bloco=prova.bloco,
         nivel=prova.nivel,
         n_alunos=len(alunos),
-        parametros=params,
+        parametros=params or ParametrosEnvelope(),
         alunos=alunos,
         itens=itens,
         avisos=avisos,

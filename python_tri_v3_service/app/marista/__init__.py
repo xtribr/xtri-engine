@@ -15,6 +15,14 @@ from app.marista.correcao import (
     corrigir,
     corrigir_aluno,
 )
+from app.marista.escala_oficial import (
+    ANO_PADRAO,
+    EscalaOficial,
+    adaptar,
+    anos_disponiveis,
+    carregar_escala,
+    tabelas_da_prova,
+)
 from app.marista.estrutura import Item, Prova, carregar_provas, obter_prova
 from app.marista.referencia import (
     FaixaReferencia,
@@ -26,6 +34,8 @@ from app.marista.referencia import (
 from app.marista.respostas import RespostaAluno, ler_respostas
 
 __all__ = [
+    "ANO_PADRAO",
+    "EscalaOficial",
     "EstatisticaItem",
     "FaixaReferencia",
     "Item",
@@ -35,6 +45,9 @@ __all__ = [
     "ResultadoAluno",
     "ResultadoArea",
     "ResultadoTurma",
+    "adaptar",
+    "anos_disponiveis",
+    "carregar_escala",
     "carregar_provas",
     "corrigir",
     "corrigir_aluno",
@@ -43,4 +56,5 @@ __all__ = [
     "obter_prova",
     "tabela",
     "tabela_por_area",
+    "tabelas_da_prova",
 ]

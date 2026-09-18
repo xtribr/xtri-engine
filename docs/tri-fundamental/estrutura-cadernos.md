@@ -158,23 +158,58 @@ O arquivo de marcações tem uma linha por estudante: colunas de identificação
 (`aluno_id`, `nome`, `turma`, `matricula`) e uma coluna por questão, com
 cabeçalho `1`…`60`, `q1`… ou `questao_1`…
 
-### Fórmula do envelope
+### Ancoragem: escala oficial do ENEM adaptada
 
-    p        = acertos / nº de itens
-    forma    = 4p(1 − p)
-    mediana  = 200 + 600 · (3p² − 2p³) + deslocamento · forma
-    amplitude = dispersão-base × ajuste da área × √(10 / nº de itens) × forma
-    mínimo, máximo = mediana ∓ amplitude        (tudo limitado a [200, 800])
+A nota não sai de curva inventada. Para cada área, a proporção de acertos na
+prova curta é lida na **curva real do ENEM** daquela área:
 
-Reproduz a planilha `Tabela_Referencia_TRI_Fundamental_II_Provisoria.xlsx`:
-conferido contra as 440 linhas da aba "Base longa", **1734 dos 1760 valores
-batem exatamente**; os 26 restantes diferem 0,1 por arredondamento de fronteira
-`.x5` no Excel. Para o Ensino Médio os parâmetros usados são deslocamento 0 e
-ajuste de área 1 — cada série numa escala própria, porque escala vertical entre
-séries exige itens comuns e calibração conjunta, que não existem aqui.
+    p    = acertos / nº de itens da prova
+    x    = p × nº de itens da prova do ENEM na mesma área
+    nota = interpolação linear da tabela oficial em x
+
+Fonte: `app/referencias/tri_tabela_referencia_multiano.json`, a mesma tabela que
+o fluxo de CSV do frontend usa. Ano padrão **2024** — o mais recente disponível
+e o único, junto com 2009, 2015, 2017, 2019, 2021 e 2022, sem mediana
+não-monotônica em nenhuma das quatro áreas.
+
+Extremos de cada área em 2024, preservados exatamente na adaptação:
+
+| Área | Itens no ENEM | Zero acerto | Prova inteira |
+|---|---:|---:|---:|
+| LC | 45 | 301,4 | 795,8 |
+| CH | 45 | 283,8 | 819,7 |
+| CN | 44 | 342,1 | 867,2 |
+| MT | 45 | 371,0 | 961,9 |
+
+O envelope [mínimo, máximo] é o envelope oficial **alargado por √(N/n)**: a
+mesma proficiência medida com menos itens é medida com menos informação, e o
+intervalo tem que refletir isso. CN do 6º ano, com 5 itens contra 44 do ENEM,
+alarga por 2,97; LC do 6º ano, com 20 contra 45, alarga por 1,50. O alargamento
+é limitado ao piso e ao teto da própria área.
+
+Validação: adaptar uma área para o próprio número de itens do ENEM reproduz a
+tabela oficial valor a valor (diferença máxima 0,000 nas quatro áreas).
+
+Achado nos dados oficiais de 2024: a coluna mínima **não** é monotônica em CN
+(2 pontos) e em MT (7 pontos) — em Matemática, o mínimo com 6 acertos é 342,8,
+abaixo dos 369,4 de zero acerto. É dado oficial, não erro: na TRI um padrão de
+respostas incoerente com mais acertos pode pontuar menos. Por isso o piso da
+área é o menor mínimo de toda a curva, não o valor em zero acerto.
 
 A tabela gerada para os dois blocos está em `tabela_referencia_marista.csv`
-(565 linhas), com a coluna `status = HIPOTESE_PRE_CALIBRACAO`.
+(565 linhas), com a coluna `ancoragem = ENEM_2024_ADAPTADO_POR_PROPORCAO`.
+
+A hipótese pré-calibração de Fundamental II (curva sintética 200–800) continua
+disponível em `referencia.py` e é usada passando `parametros=` para `corrigir`.
+
+### Leitura pedagógica: o que essa escala significa
+
+Aplicar a escala do ENEM a uma prova de 6º ano é uma decisão pedagógica, não
+estatística. Um estudante de 6º ano que acerta 5 dos 10 itens de Matemática
+aparece em 693,3 — que na escala do ENEM é desempenho alto de fim de Ensino
+Médio. A nota diz "metade dos itens desta prova", não "equivale a um
+concluinte do ENEM com 693". O relatório para as famílias precisa dizer isso
+explicitamente, ou a escala será lida como comparação direta com o ENEM.
 
 ### O que o motor deliberadamente não faz
 
