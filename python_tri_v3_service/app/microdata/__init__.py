@@ -26,6 +26,13 @@ from app.microdata.dashboards import (
 )
 from app.microdata.excel_export import build_microdata_csv, build_microdata_excel
 from app.microdata.loader import load_microdata
+from app.microdata.psychometrics_2025 import (
+    Enem2025Paths,
+    PsychometricReport,
+    analyze_enem_2025_area,
+    export_psychometric_report,
+    resolve_enem_2025_paths,
+)
 from app.microdata.report import (
     build_full_payload,
     build_full_prompt,
@@ -57,4 +64,9 @@ __all__ = [
     "build_prompt",
     "generate_full_report",
     "generate_report",
+    "Enem2025Paths",
+    "PsychometricReport",
+    "analyze_enem_2025_area",
+    "export_psychometric_report",
+    "resolve_enem_2025_paths",
 ]

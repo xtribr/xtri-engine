@@ -1,0 +1,26 @@
+{
+  "ano": 2025,
+  "area": "MT",
+  "aplicacao": "regular",
+  "linhas_lidas": 4810772,
+  "participantes_presentes_area": 3260336,
+  "participantes_analisados": 3197465,
+  "participantes_por_aplicacao": {
+    "bam": 62206,
+    "reaplicacao": 665,
+    "regular": 3197465
+  },
+  "exclusoes": {
+    "resposta_tamanho_invalido": 0
+  },
+  "cadernos_analisados": 9,
+  "itens_canonicos": 47,
+  "itens_analisados": 45,
+  "itens_abandonados": 2,
+  "taxa_acerto_mediana_itens": 0.318585191706555,
+  "discriminacao_mediana": 0.31508466190784506,
+  "itens_discriminacao_baixa": 11,
+  "itens_discriminacao_negativa": 0,
+  "alpha_cronbach_ponderado_cadernos": 0.8432228762998853,
+  "nota_metodologica": "Indicadores CTT descritivos; não substituem a nota oficial TRI. Participantes e Resultados 2025 não foram relacionados."
+}
