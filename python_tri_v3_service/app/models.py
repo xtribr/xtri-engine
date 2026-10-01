@@ -1168,3 +1168,101 @@ class RuntimeDesktopStatusResponse(BaseModel):
     ano_referencia: int
     simulado_id: Optional[str] = None
     status_areas: Dict[str, str] = Field(default_factory=dict)
+
+
+# ════════════════════════════════════════════════════════════════════════════════
+# MODELOS — SIMULADO BINARIZADO (POST /api/v3/processar-json)
+# ════════════════════════════════════════════════════════════════════════════════
+
+class AlunoBinarizado(BaseModel):
+    """Um aluno do simulado: respostas 0/1 na ordem das questões (1..N)."""
+    id: Optional[str] = None
+    matricula: Optional[str] = None
+    nome: Optional[str] = None
+    turma: Optional[str] = None
+    fez_area: Dict[str, bool] = Field(
+        default_factory=dict,
+        description="Área ausente aqui conta como feita; false exclui o aluno da área",
+    )
+    acertos: Optional[Dict[str, int]] = Field(None, description="Ignorado; recalculado das respostas")
+    respostas: List[Optional[int]] = Field(..., min_length=1, max_length=400)
+
+
+class RequestSimuladoBinarizado(BaseModel):
+    """Simulado ENEM inteiro, no formato binarizado da plataforma."""
+    ano_referencia: int = Field(2023, description="Ano da escala ENEM (ver /api/v3/anos-referencia)")
+    total_questoes: Optional[int] = None
+    total_alunos: Optional[int] = None
+    areas: Dict[str, List[int]] = Field(
+        default_factory=lambda: {"LC": [1, 45], "CH": [46, 90], "CN": [91, 135], "MT": [136, 180]},
+        description="Faixa [início, fim] de questões de cada área (1-indexado, inclusivo)",
+    )
+    alunos: List[AlunoBinarizado] = Field(..., min_length=1, max_length=50_000)
+
+    @field_validator("areas")
+    @classmethod
+    def _faixas_com_dois_limites(cls, v: Dict[str, List[int]]) -> Dict[str, List[int]]:
+        for area, faixa in v.items():
+            if len(faixa) != 2:
+                raise ValueError(f"Faixa de {area} deve ser [início, fim]")
+        return v
+
+
+class ItemBinarizado(BaseModel):
+    questao: int
+    a: float
+    b: float
+    c: float
+    taxa_acerto: float
+    r_item_resto: Optional[float] = None
+    saturado: bool = False
+
+
+class ResumoAreaBinarizado(BaseModel):
+    acertos_medio: float
+    theta_medio: float
+    nota_media: float
+    nota_dp: float
+    nota_min: float
+    nota_mediana: float
+    nota_max: float
+
+
+class AreaBinarizado(BaseModel):
+    questoes: List[int]
+    n_alunos: int
+    modelo: str
+    resumo: ResumoAreaBinarizado
+    curva_condicional: Dict[str, Any]
+    itens: List[ItemBinarizado]
+
+
+class NotaAreaBinarizado(BaseModel):
+    acertos: int
+    theta: float
+    se_theta: float
+    posicao_no_grupo: float = Field(..., description="u: posição entre quem teve os mesmos acertos (0,01–0,99)")
+    nota_tri: float
+    nivel: str
+
+
+class ResultadoAlunoBinarizado(BaseModel):
+    id: Optional[str] = None
+    matricula: Optional[str] = None
+    nome: Optional[str] = None
+    turma: Optional[str] = None
+    fez_area: Dict[str, bool]
+    areas: Dict[str, NotaAreaBinarizado]
+    media_tri: Optional[float] = Field(None, description="Média das áreas; null se faltar alguma área")
+
+
+class ResponseSimuladoBinarizado(BaseModel):
+    status: Literal["sucesso"]
+    ano_referencia: int
+    metodo: Dict[str, Any]
+    total_alunos: int
+    total_questoes: int
+    areas: Dict[str, AreaBinarizado]
+    alunos: List[ResultadoAlunoBinarizado]
+    avisos: List[str] = []
+    tempo_processamento: float = 0.0

@@ -23,11 +23,14 @@ from ..models import (
     RequestEstimarTheta,
     ResponseCalibrarCientifico,
     ResponseEstimarTheta,
+    RequestSimuladoBinarizado,
     ResponseProcessarCSV,
+    ResponseSimuladoBinarizado,
     ResultadoAlunoCientifico,
     ResultadoAlunoFrontend,
 )
 from ..motores.cientifico import estimar_theta_individual, pipeline_cientifico
+from ..simulado_binarizado import SimuladoInvalidoError, processar_simulado_binarizado
 from ..runtime.unidim import (
     RuntimeArtifactAmbiguousError,
     RuntimeArtifactNotFoundError,
@@ -619,3 +622,44 @@ async def processar_csv(
         metodologia=metodologia,
         coorte_stats=coorte_stats,
     )
+
+
+@router.post("/api/v3/processar-json", response_model=ResponseSimuladoBinarizado)
+def processar_json(payload: RequestSimuladoBinarizado):
+    """
+    Corrige um simulado ENEM inteiro enviado como JSON binarizado.
+
+    Cada área é calibrada separadamente (3PL; c fixo em 0.20, estimado por
+    item com ≥ 500 alunos na área) e ancorada na escala do ENEM do
+    ``ano_referencia`` pela posição condicional aos acertos. Função síncrona
+    de propósito: o FastAPI a executa no threadpool, sem travar o event loop.
+    """
+    tabelas_multiano = state.get_tabelas_multiano()
+    if payload.ano_referencia not in tabelas_multiano:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ano {payload.ano_referencia} nao disponivel. Opcoes: {sorted(tabelas_multiano.keys())}",
+        )
+
+    t0 = time.time()
+    try:
+        resultado = processar_simulado_binarizado(
+            payload.model_dump(),
+            tabelas_multiano[payload.ano_referencia],
+            payload.ano_referencia,
+        )
+    except SimuladoInvalidoError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.exception("processar-json calibration failed")
+        raise HTTPException(status_code=500, detail=f"Erro na calibracao: {e}")
+
+    if not resultado["areas"]:
+        raise HTTPException(status_code=400, detail="; ".join(resultado["avisos"]) or "Nenhuma área calibrada.")
+
+    tempo = round(time.time() - t0, 2)
+    logger.info(
+        "processar-json ano=%d alunos=%d areas=%s em %.2fs",
+        payload.ano_referencia, resultado["total_alunos"], list(resultado["areas"]), tempo,
+    )
+    return ResponseSimuladoBinarizado(**resultado, tempo_processamento=tempo)

@@ -196,6 +196,7 @@ def calibrar_itens_mml_em(
     tol: float = 1e-4,
     chunk_size: int = 4096,
     c_strategy: str = "fixed",
+    bayes_min_n: Optional[int] = None,
 ) -> list[ItemParameter]:
     """
     Calibra itens conjuntamente via MML/EM.
@@ -214,6 +215,8 @@ def calibrar_itens_mml_em(
             — below that threshold the Bayes path gracefully falls back to
             fixed ``c``. Expected MAE improvement: 5-10 points on cohorts
             where true item guessing rates vary (per the Apr-2026 audit).
+        bayes_min_n: limiar de alunos informativos para estimar ``c`` no
+            caminho ``"bayes"``. ``None`` usa ``_BAYES_C_MIN_N``.
     """
 
     if resp_matrix.ndim != 2 or resp_matrix.size == 0:
@@ -245,15 +248,16 @@ def calibrar_itens_mml_em(
     # only safe when there are enough informative students (_BAYES_C_MIN_N);
     # below that the Beta prior dominates anyway and the extra degree of
     # freedom just introduces noise.
+    limiar_bayes = _BAYES_C_MIN_N if bayes_min_n is None else int(bayes_min_n)
     use_bayes_c = (
-        c_strategy == "bayes" and resp_for_em.shape[0] >= _BAYES_C_MIN_N
+        c_strategy == "bayes" and resp_for_em.shape[0] >= limiar_bayes
     )
     if c_strategy == "bayes" and not use_bayes_c:
         logger.info(
             "calibrar_itens_mml_em: c_strategy='bayes' requested but only "
             "%d informative rows (< %d); falling back to fixed c=%s.",
             resp_for_em.shape[0],
-            _BAYES_C_MIN_N,
+            limiar_bayes,
             c,
         )
 

@@ -128,6 +128,7 @@ def _processar_tri_reduzida(
             acertos_observados=int(r["acertos"]),
             n_itens_validos=n_itens_validos,
             tabela=tab,
+            curva=resultado.get("curva_condicional"),
         )
         notas.append(proj["nota_enem_projetada"])
         resultados.append({

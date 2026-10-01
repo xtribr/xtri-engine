@@ -116,7 +116,7 @@ Routers em `app/routers/`:
 |---|---|---|---|
 | `system.py` | `GET /health`, `GET /api/debug` | — | Saúde/debug |
 | `v2.py` | `POST /api/calcular-tri` | Heurístico | Substituto drop-in do V2, JSON bruto com campos `qN` |
-| `v3.py` | `POST /api/v3/calibrar-cientifico`, `POST /api/v3/estimar-theta`, `GET /api/v3/referencias/{area}`, `GET /api/v3/anos-referencia`, `POST /api/v3/processar-csv` | Científico | Calibração completa (mín. 10 alunos), theta individual, tabelas de referência, CSV em lote |
+| `v3.py` | `POST /api/v3/calibrar-cientifico`, `POST /api/v3/estimar-theta`, `GET /api/v3/referencias/{area}`, `GET /api/v3/anos-referencia`, `POST /api/v3/processar-csv`, `POST /api/v3/processar-json` | Científico | Calibração completa (mín. 10 alunos), theta individual, tabelas de referência, CSV em lote, simulado completo em JSON binarizado (`app/simulado_binarizado.py`) |
 | `v4_inep.py` | `POST /api/v4/enem/calcular-com-inep`, `POST /api/v4/enem/validar-simulado`, `GET /api/v4/enem/info`, `GET /api/v4/enem/provas/{ano}/{area}`, `GET /api/v4/enem/itens/{ano}/{area}/{co_prova}`, `GET /api/v4/enem/transformacao/{ano}/{area}` | Parâmetros INEP | Validação contra parâmetros oficiais de itens vindos do Supabase |
 | `v5_microdata.py` | `POST /api/v5/microdata/prepare`, `GET /api/v5/microdata/job/{job_id}`, `/status/{year}`, `/anos-disponiveis`, `/breakdown/{year}`, `/dashboard{,-data}/{year}`, `/report/{year}[/full]`, `/full-report/{year}`, `/export-csv/{year}`, `/export-excel/{year}`, `GET /api/v5/runtime/status` | Microdados | Pipeline longo: `prepare` → polling no job → dashboards/relatórios/exportação |
 | `v5_mirt.py` | `POST /api/v5/mirt/calibracoes`, `GET /api/v5/mirt/calibracoes/{job_id}`, `POST /api/v5/mirt/estimar-theta`, `POST /api/v5/mirt/estimar-theta-lote`, `GET /api/v5/mirt/availability` | MIRT (R) | Calibração multidimensional assíncrona e escoragem em lote |
@@ -141,13 +141,20 @@ Routers em `app/routers/`:
 `app/referencias/` na inicialização:
 
 - **Ano único** (`tri_tabela_referencia_oficial.json`) — endpoints V2/V3
-- **Multi-ano** (`tri_tabela_referencia_multiano.json`) — **10 anos**
-  (2009, 2015–2022, 2024) usados pelo fluxo de CSV do frontend
+- **Multi-ano** (`tri_tabela_referencia_multiano.json`) — **11 anos**
+  (2009, 2015–2024) usados pelo fluxo de CSV do frontend; 2023 foi gerado dos
+  microdados oficiais por `scripts_local/gerar_referencia_ano.py`
 
-Cada tabela mapeia `(area, acertos) -> {tri_min, tri_med, tri_max}`; o motor
-científico usa `norm.cdf(theta)` para interpolar dentro de cada faixa. O
-envelope de referência por ano/acertos é o limite primário de corte, e os tetos
-de `TRI_MAXIMA_OFICIAL` / `TRI_MINIMA_OFICIAL` continuam valendo.
+Cada tabela mapeia `(area, acertos) -> {tri_min, tri_med, tri_max}`. A posição
+do aluno dentro da faixa é **condicional aos acertos** (`app/irt/conditional.py`):
+`u = Φ(w·(theta − m(k))/s(k))`, em que `m(k)` e `s(k)` são a média e o desvio do
+theta entre quem faz `k` acertos, derivados dos parâmetros dos itens, e
+`w = min(0,9; n/(n+25))` encolhe a posição em direção à mediana em calibrações
+pequenas. O aluno típico de cada número de acertos recebe `tri_med`. Os anos 2023 e 2024
+têm percentis completos por acertos (`tri_quantis_referencia.json`); os demais
+usam mín/med/máx. A regra antiga, `norm.cdf(theta)` absoluto, travava a nota no
+mínimo ou no máximo da faixa e só permanece como caminho legado quando não há
+curva (rotas MIRT). Os limites de `TRI_MINIMA_OFICIAL` continuam valendo.
 
 ### Módulos de apoio
 

@@ -2,8 +2,10 @@
 Transformações do núcleo IRT.
 
 O motor sempre ancora notas dentro da faixa oficial por acertos
-(`tri_min..tri_med..tri_max`). O corte entre `MIN-MED` e `MED-MAX` vem do
-theta em uma escala de referência fixa do modelo, nunca da média da turma.
+(`tri_min..tri_med..tri_max`). Quando há curva condicional (derivada dos
+parâmetros dos itens, ver `conditional.py`), a posição na faixa é relativa a
+quem teve o mesmo número de acertos. Sem curva, vale a regra legada: o corte
+entre `MIN-MED` e `MED-MAX` vem do theta absoluto do modelo.
 """
 
 from typing import Dict, Optional, Sequence, Union
@@ -16,6 +18,7 @@ from ..tabela_referencia import (
     TRI_MINIMA_OFICIAL,
     TabelaReferenciaTRI,
 )
+from .conditional import CurvaCondicional, nota_por_posicao, posicao_relativa
 from .contracts import ThetaEstimate
 
 DEFAULT_REFERENCE_RANGE_TOLERANCE = 0.03
@@ -104,11 +107,13 @@ def ancorar_nota_individual(
     tabela: TabelaReferenciaTRI,
     transformacao: Optional[Dict[str, Union[float, str]]] = None,
     tolerancia_pct: float = DEFAULT_REFERENCE_RANGE_TOLERANCE,
+    curva: Optional[CurvaCondicional] = None,
 ) -> float:
     """
     Ancora um único aluno na faixa oficial por acertos.
 
-    Ordem de preferência:
+    Com `curva`, usa a posição relativa ao mesmo número de acertos (regra
+    condicional). Sem ela, mantém a regra legada, na ordem de preferência:
     1. theta em escala de referência fixa explícita no artefato
     2. theta bruto do modelo, que já vive na escala latente N(0,1)
     """
@@ -117,6 +122,18 @@ def ancorar_nota_individual(
     ref_min = float(ref["tri_min"])
     ref_med = float(ref["tri_med"])
     ref_max = float(ref["tri_max"])
+
+    if curva is not None:
+        obter_quantis = getattr(tabela, "obter_quantis", None)
+        nota = nota_por_posicao(
+            posicao_relativa(theta, acertos, curva),
+            ref_min=ref_min,
+            ref_med=ref_med,
+            ref_max=ref_max,
+            quantis=obter_quantis(area, acertos) if obter_quantis else None,
+        )
+        tri_minima = TRI_MINIMA_OFICIAL.get(area, 200.0)
+        return max(tri_minima, min(float(nota), 1000.0))
 
     if ref_min == ref_max:
         return _clip_nota_na_faixa_referencia(
@@ -148,8 +165,9 @@ def ancorar_notas(
     thetas: Sequence[ThetaEstimate],
     tabela: TabelaReferenciaTRI,
     area: str,
+    curva: Optional[CurvaCondicional] = None,
 ) -> list[ThetaEstimate]:
-    """Mapeia θ -> nota usando theta de referência fixa, sem média da turma."""
+    """Mapeia θ -> nota; com `curva`, pela posição relativa ao mesmo acerto."""
 
     if not thetas:
         return []
@@ -162,6 +180,7 @@ def ancorar_notas(
             acertos=int(t["acertos"]),
             tabela=tabela,
             tolerancia_pct=0.0,
+            curva=curva,
         )
         resultados.append({**t, "nota_ancorada": round(float(nota), 1)})
 

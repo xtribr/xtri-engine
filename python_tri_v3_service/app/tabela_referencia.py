@@ -99,6 +99,7 @@ class TabelaReferenciaTRI:
         # Áreas disponíveis
         self.areas = list(self.lookup.keys())
         self.ano: Optional[int] = None
+        self.quantis: Dict[str, Dict[int, list]] = {}
 
     def obter(self, area: str, acertos: int) -> Dict[str, float]:
         """
@@ -126,6 +127,18 @@ class TabelaReferenciaTRI:
                 acertos = 0
 
         return self.lookup[area][acertos]
+
+    def obter_quantis(self, area: str, acertos: int) -> Optional[list]:
+        """
+        Percentis da nota para uma área e número de acertos, quando o ano tem
+        distribuição completa (mín, p01, p05, p10, p25, p50, p75, p90, p95,
+        p99, máx). Retorna None para anos que só têm mín/med/máx.
+        """
+        por_acertos = getattr(self, "quantis", {}).get(area)
+        if not por_acertos:
+            return None
+        acertos = max(min(por_acertos), min(int(acertos), max(por_acertos)))
+        return por_acertos.get(acertos)
 
     def validar(self) -> bool:
         """Valida integridade da tabela (monotonia da mediana)."""
@@ -198,6 +211,25 @@ class TabelaReferenciaTRI:
                         'tri_max': round(valores['tri_max'], 1),
                     }
             instance.areas = list(instance.lookup.keys())
+            instance.quantis = {}
             tabelas[instance.ano] = instance
 
+        cls._anexar_quantis(tabelas, os.path.dirname(json_path))
         return tabelas
+
+    @staticmethod
+    def _anexar_quantis(tabelas: Dict[int, "TabelaReferenciaTRI"], pasta: str) -> None:
+        """Anexa percentis por acertos aos anos presentes em `tri_quantis_referencia.json`."""
+        caminho = os.path.join(pasta, 'tri_quantis_referencia.json')
+        if not os.path.isfile(caminho):
+            return
+        with open(caminho, 'r') as f:
+            raw = json.load(f)
+        for ano_str, areas_data in raw.items():
+            tabela = tabelas.get(int(ano_str))
+            if tabela is None:
+                continue
+            tabela.quantis = {
+                area: {int(k): [float(v) for v in valores] for k, valores in por_acertos.items()}
+                for area, por_acertos in areas_data.items()
+            }

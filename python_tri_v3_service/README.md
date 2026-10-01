@@ -6,6 +6,7 @@ API de estimação TRI para simulados ENEM com dois motores:
 |---|---|---|
 | **Heurístico** (V2 compat.) | `POST /api/calcular-tri` | Feedback em tempo real, turmas pequenas |
 | **Científico** (MML + EAP) | `POST /api/v3/calibrar-cientifico` | Fechamento de simulados, banco de itens |
+| **Simulado completo (JSON)** | `POST /api/v3/processar-json` | Simulado ENEM inteiro binarizado → TRI 3PL das 4 áreas |
 | **Theta Individual** | `POST /api/v3/estimar-theta` | Alunos retardatários, OMR assíncrono |
 | **Calibração MIRT** | `POST /api/v5/mirt/calibracoes` | Ajuste multidimensional assíncrono por simulado × área |
 | **Scoring MIRT em lote** | `POST /api/v5/mirt/estimar-theta-lote` | Correção de até 10 mil alunos com um artefato calibrado |
@@ -51,6 +52,16 @@ curl -X POST http://localhost:5003/api/v3/calibrar-cientifico \
       {"aluno_id": "uuid-1", "nome": "João", "respostas": [1,0,1,1,0,...]}
     ]
   }'
+```
+
+### Simulado completo em JSON binarizado
+Recebe o simulado inteiro (todas as áreas) e devolve parâmetros dos itens e
+notas por aluno. Guia de integração: [`INTEGRACAO_PROCESSAR_JSON.md`](INTEGRACAO_PROCESSAR_JSON.md).
+
+```bash
+curl -X POST http://localhost:5003/api/v3/processar-json \
+  -H "Content-Type: application/json" \
+  -d @binarizado.json
 ```
 
 ### Swagger UI

@@ -7,17 +7,18 @@ Não produz nota oficial INEP; produz uma projeção pedagógica auditável.
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, Optional
 
 import numpy as np
 from scipy.stats import norm
 
 from ..tabela_referencia import TRI_MINIMA_OFICIAL, TabelaReferenciaTRI
+from .conditional import CurvaCondicional, nota_por_posicao, posicao_relativa
 from .transform import _interpolar_faixa_referencia
 
 N_ITENS_REFERENCIA_ENEM = 45
 MODO_SCORING_REDUZIDO = "enem_projected_reduced"
-METODO_ANCORAGEM_REDUZIDA = "proporcao_acertos_45_interpolada + theta_local"
+METODO_ANCORAGEM_REDUZIDA = "proporcao_acertos_45_interpolada + posicao_condicional_aos_acertos"
 AVISO_METODOLOGICO_REDUZIDO = (
     "Projeção de nota ENEM a partir de prova reduzida. Não é nota oficial "
     "INEP; a incerteza aumenta conforme diminui o número de itens válidos."
@@ -84,25 +85,32 @@ def _intervalo_95(
     ref_min: float,
     ref_med: float,
     ref_max: float,
+    curva: Optional[CurvaCondicional] = None,
+    acertos_observados: Optional[int] = None,
 ) -> dict[str, float]:
     """Calcula intervalo aproximado em pontos de nota para prova reduzida."""
 
     fator_reducao = math.sqrt(N_ITENS_REFERENCIA_ENEM / max(n_itens_validos, 1))
     se_ajustado = max(float(se_theta), 0.0) * fator_reducao
-    pct_low = float(norm.cdf(theta - 1.96 * se_ajustado))
-    pct_high = float(norm.cdf(theta + 1.96 * se_ajustado))
-    low = _interpolar_faixa_referencia(
-        ref_min=ref_min,
-        ref_med=ref_med,
-        ref_max=ref_max,
-        pct=pct_low,
-    )
-    high = _interpolar_faixa_referencia(
-        ref_min=ref_min,
-        ref_med=ref_med,
-        ref_max=ref_max,
-        pct=pct_high,
-    )
+    if curva is not None and acertos_observados is not None:
+        faixa = {"ref_min": ref_min, "ref_med": ref_med, "ref_max": ref_max}
+        low = nota_por_posicao(
+            posicao_relativa(theta - 1.96 * se_ajustado, acertos_observados, curva), **faixa)
+        high = nota_por_posicao(
+            posicao_relativa(theta + 1.96 * se_ajustado, acertos_observados, curva), **faixa)
+    else:
+        low = _interpolar_faixa_referencia(
+            ref_min=ref_min,
+            ref_med=ref_med,
+            ref_max=ref_max,
+            pct=float(norm.cdf(theta - 1.96 * se_ajustado)),
+        )
+        high = _interpolar_faixa_referencia(
+            ref_min=ref_min,
+            ref_med=ref_med,
+            ref_max=ref_max,
+            pct=float(norm.cdf(theta + 1.96 * se_ajustado)),
+        )
     tri_minima = TRI_MINIMA_OFICIAL.get(area, 200.0)
     low = max(tri_minima, min(low, ref_max))
     high = max(tri_minima, min(high, ref_max))
@@ -122,8 +130,14 @@ def ancorar_nota_reduzida(
     acertos_observados: int,
     n_itens_validos: int,
     tabela: TabelaReferenciaTRI,
+    curva: Optional[CurvaCondicional] = None,
 ) -> dict[str, Any]:
-    """Projeta uma resposta reduzida na escala ENEM de 45 itens."""
+    """Projeta uma resposta reduzida na escala ENEM de 45 itens.
+
+    Com `curva` (derivada dos itens da prova reduzida), a posição na faixa é
+    relativa a quem teve o mesmo número de acertos; sem ela, vale a regra
+    legada de theta absoluto.
+    """
 
     if n_itens_validos < 10:
         raise ValueError("Escala reduzida exige mínimo 10 itens válidos.")
@@ -140,13 +154,20 @@ def ancorar_nota_reduzida(
     ref_min = float(ref["tri_min"])
     ref_med = float(ref["tri_med"])
     ref_max = float(ref["tri_max"])
-    pct_theta = float(norm.cdf(theta))
-    nota = _interpolar_faixa_referencia(
-        ref_min=ref_min,
-        ref_med=ref_med,
-        ref_max=ref_max,
-        pct=pct_theta,
-    )
+    if curva is not None:
+        nota = nota_por_posicao(
+            posicao_relativa(theta, acertos_observados, curva),
+            ref_min=ref_min,
+            ref_med=ref_med,
+            ref_max=ref_max,
+        )
+    else:
+        nota = _interpolar_faixa_referencia(
+            ref_min=ref_min,
+            ref_med=ref_med,
+            ref_max=ref_max,
+            pct=float(norm.cdf(theta)),
+        )
     nota = max(TRI_MINIMA_OFICIAL.get(area, 200.0), min(float(nota), ref_max))
     return {
         "acertos_observados": int(acertos_observados),
@@ -165,6 +186,8 @@ def ancorar_nota_reduzida(
             ref_min=ref_min,
             ref_med=ref_med,
             ref_max=ref_max,
+            curva=curva,
+            acertos_observados=acertos_observados,
         ),
         "precisao": precisao_por_tamanho(n_itens_validos),
         "faixa_referencia": ref,

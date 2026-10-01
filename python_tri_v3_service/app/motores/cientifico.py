@@ -11,12 +11,15 @@ Regras invioláveis:
 1. Calibração independente por simulado × área (NUNCA misturar)
 2. Parâmetro c fixo em 0.20 (5 alternativas) para N < 500 — isto torna o modelo
    um 3PL de c fixo; descrever como "2PL" nos rótulos/relatórios é incorreto.
-3. Ancoragem contínua: nota = ref_min_K + norm.cdf(θ) × (ref_max_K − ref_min_K)
+3. Ancoragem condicional aos acertos: a posição na faixa de referência de K
+   acertos é relativa a quem fez K acertos, u = Φ(w·(θ − m(K))/s(K)), com
+   m(K) e s(K) derivados dos parâmetros dos itens (ver app/irt/conditional.py).
 """
 
 import numpy as np
 from typing import Any, Dict, List, Optional
 
+from ..irt.conditional import curva_teorica
 from ..irt.contracts import ItemParameter, ThetaEstimate
 from ..irt.scoring import P, eap_theta, estado_tri
 from ..irt.transform import (
@@ -33,6 +36,7 @@ def calibrar_itens(
     c: float = 0.20,
     n_quad: int = 61,
     c_strategy: str = "fixed",
+    bayes_min_n: Optional[int] = None,
 ) -> List[ItemParameter]:
     """
     Calibra parâmetros a, b de cada item via MML com quadratura gaussiana.
@@ -48,12 +52,15 @@ def calibrar_itens(
             quando o cohort tem alunos suficientes (>= 1000 informativos);
             abaixo disso cai para o fixo graciosamente. Expectativa do audit
             April-2026: 5-10 pontos de MAE contra INEP quando habilitado.
+        bayes_min_n: limiar de alunos informativos para estimar ``c`` no modo
+            ``'bayes'`` (``None`` = padrão do motor, 1000).
 
     Returns:
         Lista de dicts {a, b, c, taxa_acerto, saturado}
     """
     return calibrar_itens_mml_em(
         resp_matrix, c=c, n_quad=n_quad, c_strategy=c_strategy,
+        bayes_min_n=bayes_min_n,
     )
 
 
@@ -66,6 +73,8 @@ def pipeline_cientifico(
     area: str,
     tabela: TabelaReferenciaTRI,
     c_fixo: float = 0.20,
+    c_strategy: str = "fixed",
+    bayes_min_n: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Executa o pipeline completo de calibração científica para UMA área.
@@ -77,6 +86,8 @@ def pipeline_cientifico(
         area: Área (LC, CH, CN, MT)
         tabela: Tabela de referência oficial
         c_fixo: Parâmetro c fixo (0.20 para 5 alternativas)
+        c_strategy: ``'fixed'`` (padrão) ou ``'bayes'`` — ver ``calibrar_itens``
+        bayes_min_n: limiar de alunos informativos para estimar ``c``
 
     Returns:
         Dict com 'parametros_itens', 'resultados_alunos', 'diagnostico'
@@ -86,7 +97,9 @@ def pipeline_cientifico(
     n_alunos, n_itens = resp_matrix.shape
 
     # 1. Calibrar itens
-    item_params = calibrar_itens(resp_matrix, c=c_fixo)
+    item_params = calibrar_itens(
+        resp_matrix, c=c_fixo, c_strategy=c_strategy, bayes_min_n=bayes_min_n,
+    )
 
     # Estatísticas dos parâmetros
     b_vals = [p['b'] for p in item_params]
@@ -134,8 +147,10 @@ def pipeline_cientifico(
             'acert_dif': acert_dif,
         })
 
-    # 4. Ancorar notas na tabela de referência
-    resultados = ancorar_notas(thetas, tabela, area)
+    # 4. Ancorar notas na tabela de referência, pela posição relativa a quem
+    #    teve o mesmo número de acertos.
+    curva = curva_teorica(item_params, n_calibracao=n_alunos)
+    resultados = ancorar_notas(thetas, tabela, area, curva=curva)
 
     # 5. Classificar estados TRI
     for r in resultados:
@@ -145,6 +160,8 @@ def pipeline_cientifico(
         [r["theta"] for r in resultados],
         [r["nota_ancorada"] for r in resultados],
     )
+    # Tamanho da calibração: a escoragem individual usa para o peso da posição.
+    transformacao["n_calibracao"] = float(n_alunos)
 
     # 6. Diagnóstico
     notas = [r['nota_ancorada'] for r in resultados]
@@ -169,7 +186,8 @@ def pipeline_cientifico(
         'itens_dificeis': n_dificeis,
         'acert_dif_medio': round(float(np.mean(acert_difs)), 3),
         'transformacao_metodo': transformacao["metodo"],
-        'ancoragem_metodo': 'theta_ref_fixo',
+        'ancoragem_metodo': 'condicional_acertos',
+        'ancoragem_peso': curva["peso"],
     }
 
     # Verificar % dentro do intervalo da tabela
@@ -184,6 +202,7 @@ def pipeline_cientifico(
         'parametros_itens': item_params,
         'resultados_alunos': resultados,
         'transformacao': transformacao,
+        'curva_condicional': curva,
         'diagnostico': diagnostico,
     }
 
@@ -212,12 +231,14 @@ def estimar_theta_individual(
     acertos = int(resp_array.sum())
 
     t, se = eap_theta(resp_array, parametros_itens)
+    n_calibracao = (transformacao or {}).get("n_calibracao")
     nota = ancorar_nota_individual(
         theta=t,
         area=area,
         acertos=acertos,
         tabela=tabela,
         transformacao=transformacao,
+        curva=curva_teorica(parametros_itens, n_calibracao=n_calibracao),
     )
 
     return {

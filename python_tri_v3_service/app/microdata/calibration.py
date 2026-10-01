@@ -32,6 +32,7 @@ from scipy.stats import norm
 
 from app.irt.unidim_em import calibrar_itens_mml_em
 from app.microdata.schema import AREAS, MicrodataSchema
+from app.irt.conditional import curva_teorica
 from app.motores.cientifico import ancorar_notas, estado_tri
 from app.tabela_referencia import TabelaReferenciaTRI
 
@@ -211,8 +212,10 @@ def _pipeline_cientifico_batch(
             }
         )
 
-    # 5. Anchor notas via the existing cohort-anchored function.
-    resultados = ancorar_notas(thetas, tabela, area)
+    # 5. Anchor notas by the position relative to students with the same
+    #    number of correct answers (conditional anchoring).
+    curva = curva_teorica(item_params, n_calibracao=n_alunos)
+    resultados = ancorar_notas(thetas, tabela, area, curva=curva)
     for r in resultados:
         r["estado_tri"] = estado_tri(r["nota_ancorada"])
 

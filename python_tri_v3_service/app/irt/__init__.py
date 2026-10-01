@@ -6,6 +6,7 @@ transformação para desacoplar o motor científico das rotas HTTP e do fluxo
 de microdados.
 """
 
+from .conditional import curva_teorica, nota_por_posicao, posicao_relativa
 from .contracts import ItemParameter, ThetaEstimate
 from .reduced_scale import ancorar_nota_reduzida, obter_faixa_referencia_continua
 from .scoring import P, eap_theta, estado_tri
@@ -17,6 +18,9 @@ __all__ = [
     "ThetaEstimate",
     "P",
     "ancorar_nota_reduzida",
+    "curva_teorica",
+    "nota_por_posicao",
+    "posicao_relativa",
     "obter_faixa_referencia_continua",
     "eap_theta",
     "estado_tri",

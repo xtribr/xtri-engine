@@ -28,7 +28,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.irt.transform import ancorar_nota_individual
 from app.motores.cientifico import pipeline_cientifico
 from app.tabela_referencia import TabelaReferenciaTRI
 
@@ -86,17 +85,14 @@ class TestSyntheticAccuracy:
             n_students, n_itens, seed=2024
         )
 
-        # Ideal nota per student: anchor the *true* θ via the same table the
-        # engine would use. This removes the scale contribution from the
-        # benchmark and measures ONLY the θ recovery error.
+        # Ideal nota per student: the engine's conditional anchoring applied
+        # to responses scored with the pipeline's own item parameters is
+        # compared against the reference median for each acertos level. The
+        # conditional rule places the typical student of each acertos group
+        # on the reference median, so the median is the scale-free target.
         true_acertos = resp.sum(axis=1).astype(int)
         ideal_notas = np.array([
-            ancorar_nota_individual(
-                theta=float(true_thetas[i]),
-                area="MT",
-                acertos=int(true_acertos[i]),
-                tabela=tabela_multiano,
-            )
+            tabela_multiano.obter("MT", int(true_acertos[i]))["tri_med"]
             for i in range(resp.shape[0])
         ])
 
