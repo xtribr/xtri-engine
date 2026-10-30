@@ -29,6 +29,7 @@ from ..irt.transform import (
 )
 from ..irt.unidim_em import calibrar_itens_mml_em
 from ..tabela_referencia import TabelaReferenciaTRI
+from ..versao import agora_fortaleza, motor_versao
 
 
 def calibrar_itens(
@@ -37,7 +38,8 @@ def calibrar_itens(
     n_quad: int = 61,
     c_strategy: str = "fixed",
     bayes_min_n: Optional[int] = None,
-) -> List[ItemParameter]:
+    return_info: bool = False,
+):
     """
     Calibra parâmetros a, b de cada item via MML com quadratura gaussiana.
 
@@ -55,12 +57,15 @@ def calibrar_itens(
         bayes_min_n: limiar de alunos informativos para estimar ``c`` no modo
             ``'bayes'`` (``None`` = padrão do motor, 1000).
 
+        return_info: com ``True``, devolve ``(params, info)`` com
+            ``info = {"iteracoes", "convergiu"}`` do EM.
+
     Returns:
         Lista de dicts {a, b, c, taxa_acerto, saturado}
     """
     return calibrar_itens_mml_em(
         resp_matrix, c=c, n_quad=n_quad, c_strategy=c_strategy,
-        bayes_min_n=bayes_min_n,
+        bayes_min_n=bayes_min_n, return_info=return_info,
     )
 
 
@@ -75,6 +80,7 @@ def pipeline_cientifico(
     c_fixo: float = 0.20,
     c_strategy: str = "fixed",
     bayes_min_n: Optional[int] = None,
+    ano_referencia: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Executa o pipeline completo de calibração científica para UMA área.
@@ -88,17 +94,22 @@ def pipeline_cientifico(
         c_fixo: Parâmetro c fixo (0.20 para 5 alternativas)
         c_strategy: ``'fixed'`` (padrão) ou ``'bayes'`` — ver ``calibrar_itens``
         bayes_min_n: limiar de alunos informativos para estimar ``c``
+        ano_referencia: ano da escala ENEM da tabela (só registrado em
+            ``execucao``; ``None`` quando o chamador não informa)
 
     Returns:
-        Dict com 'parametros_itens', 'resultados_alunos', 'diagnostico'
+        Dict com 'parametros_itens', 'resultados_alunos', 'diagnostico' e
+        'execucao' (versão do motor, ano, estratégia de c, convergência do EM
+        e horário)
     """
     # Montar matriz de respostas (N_alunos × N_itens)
     resp_matrix = np.array([a['respostas'] for a in alunos], dtype=int)
     n_alunos, n_itens = resp_matrix.shape
 
     # 1. Calibrar itens
-    item_params = calibrar_itens(
+    item_params, info_em = calibrar_itens(
         resp_matrix, c=c_fixo, c_strategy=c_strategy, bayes_min_n=bayes_min_n,
+        return_info=True,
     )
 
     # Estatísticas dos parâmetros
@@ -188,6 +199,8 @@ def pipeline_cientifico(
         'transformacao_metodo': transformacao["metodo"],
         'ancoragem_metodo': 'condicional_acertos',
         'ancoragem_peso': curva["peso"],
+        'em_iteracoes': info_em["iteracoes"],
+        'em_convergiu': info_em["convergiu"],
     }
 
     # Verificar % dentro do intervalo da tabela
@@ -198,12 +211,22 @@ def pipeline_cientifico(
             dentro += 1
     diagnostico['pct_dentro_intervalo'] = round(dentro / len(resultados) * 100, 1) if resultados else 0
 
+    execucao = {
+        'motor_versao': motor_versao(),
+        'ano_referencia': ano_referencia,
+        'c_strategy': c_strategy,
+        'em_iteracoes': info_em["iteracoes"],
+        'em_convergiu': info_em["convergiu"],
+        'processado_em': agora_fortaleza(),
+    }
+
     return {
         'parametros_itens': item_params,
         'resultados_alunos': resultados,
         'transformacao': transformacao,
         'curva_condicional': curva,
         'diagnostico': diagnostico,
+        'execucao': execucao,
     }
 
 

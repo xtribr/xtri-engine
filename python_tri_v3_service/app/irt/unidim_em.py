@@ -8,7 +8,7 @@ projeto.
 """
 
 import logging
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence, Union
 
 import numpy as np
 from scipy.optimize import minimize
@@ -42,7 +42,9 @@ def _init_item_params(resp_matrix: np.ndarray, c: float) -> list[ItemParameter]:
     for j in range(resp_matrix.shape[1]):
         responses = resp_matrix[:, j]
         p_obs = float(np.clip(responses.mean(), c + 0.01, 0.99))
-        b_init = -np.log((1 - c) / (p_obs - c) - 1) if p_obs > c else 2.0
+        # Com theta = 0 e a = 1: p = c + (1 - c) / (1 + e^b), logo
+        # b = ln((1 - c) / (p - c) - 1). Item fácil começa com b negativo.
+        b_init = np.log((1 - c) / (p_obs - c) - 1) if p_obs > c else 2.0
         params.append(
             {
                 "a": 1.0,
@@ -192,12 +194,13 @@ def calibrar_itens_mml_em(
     resp_matrix: np.ndarray,
     c: float = 0.20,
     n_quad: int = 61,
-    max_iter: int = 50,
+    max_iter: int = 500,
     tol: float = 1e-4,
     chunk_size: int = 4096,
     c_strategy: str = "fixed",
     bayes_min_n: Optional[int] = None,
-) -> list[ItemParameter]:
+    return_info: bool = False,
+) -> Union[list[ItemParameter], tuple[list[ItemParameter], dict[str, Any]]]:
     """
     Calibra itens conjuntamente via MML/EM.
 
@@ -217,10 +220,13 @@ def calibrar_itens_mml_em(
             where true item guessing rates vary (per the Apr-2026 audit).
         bayes_min_n: limiar de alunos informativos para estimar ``c`` no
             caminho ``"bayes"``. ``None`` usa ``_BAYES_C_MIN_N``.
+        return_info: com ``True``, devolve ``(params, info)``, em que
+            ``info = {"iteracoes": n, "convergiu": bool}``. O padrão
+            ``False`` mantém o retorno antigo (só a lista de parâmetros).
     """
 
     if resp_matrix.ndim != 2 or resp_matrix.size == 0:
-        return []
+        return ([], {"iteracoes": 0, "convergiu": False}) if return_info else []
 
     # Calibrate on the informative subset, but keep the full matrix for the
     # per-item taxa_acerto diagnostic (answered by the whole cohort).
@@ -261,7 +267,10 @@ def calibrar_itens_mml_em(
             c,
         )
 
+    iteracoes = 0
+    convergiu = False
     for _ in range(max_iter):
+        iteracoes += 1
         n_k, r_jk, loglik = _expected_counts(
             resp_for_em,
             params,
@@ -320,7 +329,18 @@ def calibrar_itens_mml_em(
 
         params = new_params
         if prev_loglik is not None and abs(loglik - prev_loglik) < tol and max_delta < 1e-2:
+            convergiu = True
             break
         prev_loglik = loglik
 
+    if not convergiu:
+        logger.warning(
+            "calibrar_itens_mml_em: EM terminou sem convergir após %d iterações "
+            "(max_iter=%d, tol=%g); parâmetros podem não estar estáveis.",
+            iteracoes,
+            max_iter,
+            tol,
+        )
+    if return_info:
+        return params, {"iteracoes": iteracoes, "convergiu": convergiu}
     return params
