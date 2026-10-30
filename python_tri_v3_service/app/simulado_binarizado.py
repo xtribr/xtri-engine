@@ -11,6 +11,13 @@ Responsabilidades:
   posição no grupo, nota e nível.
 
 Áreas com menos de `N_MIN_CALIBRACAO` alunos ficam sem nota e geram aviso.
+
+Ausência por dia de prova (LC e CH no dia 1, CN e MT no dia 2): o aluno é
+AUSENTE no dia quando ``presenca`` marca o dia como falso ou quando todas as
+respostas das áreas do dia vêm ``null`` (nenhuma marcação). Ausente fica fora
+da calibração e dos resumos, sai com nota ``null`` e nível ``AUSENTE``. Dentro
+de um dia presente, ``null`` é questão em branco e conta como erro; zero
+acertos com marcações continua sendo presente.
 """
 
 from __future__ import annotations
@@ -25,6 +32,8 @@ from .motores.cientifico import pipeline_cientifico
 from .tabela_referencia import TRI_MINIMA_OFICIAL, TabelaReferenciaTRI
 
 AREAS_VALIDAS = ("LC", "CH", "CN", "MT")
+DIA_DA_AREA = {"LC": "dia1", "CH": "dia1", "CN": "dia2", "MT": "dia2"}
+NIVEL_AUSENTE = "AUSENTE"
 C_PADRAO = 0.20
 N_MIN_C_LIVRE = 500  # regra do projeto: c fixo em 0.20 para amostras < 500
 N_MIN_CALIBRACAO = 10
@@ -65,12 +74,47 @@ def _validar(dados: Mapping[str, Any]) -> tuple[dict[str, tuple[int, int]], list
             if not fez.get(area, True):
                 continue
             bloco = respostas[ini - 1:fim]
-            if any(v not in (0, 1) for v in bloco):
+            if any(v not in (0, 1, None) for v in bloco):
                 raise SimuladoInvalidoError(
-                    f"Aluno {rotulo}, área {area}: respostas devem ser 0 ou 1 "
-                    "(marque fez_area=false para quem não fez a área)."
+                    f"Aluno {rotulo}, área {area}: respostas devem ser 0 ou 1, ou null para questão "
+                    "em branco (marque fez_area=false para quem não fez a área)."
                 )
     return faixas, list(alunos)
+
+
+def _dias_ausentes(aluno: Mapping[str, Any], faixas: Mapping[str, tuple[int, int]]) -> set[str]:
+    """Dias em que o aluno faltou: presença falsa ou nenhuma marcação no dia."""
+
+    presenca = aluno.get("presenca") or {}
+    respostas = aluno.get("respostas") or []
+    ausentes: set[str] = set()
+    for dia in sorted({DIA_DA_AREA[a] for a in faixas}):
+        if presenca.get(dia) is False:
+            ausentes.add(dia)
+            continue
+        if presenca.get(dia) is True:
+            continue
+        areas_dia = [a for a in faixas if DIA_DA_AREA[a] == dia]
+        marcacoes = [
+            v
+            for a in areas_dia
+            for v in respostas[faixas[a][0] - 1:faixas[a][1]]
+        ]
+        if marcacoes and all(v is None for v in marcacoes):
+            ausentes.add(dia)
+    return ausentes
+
+
+def _nota_ausente() -> dict[str, Any]:
+    return {
+        "acertos": None,
+        "theta": None,
+        "se_theta": None,
+        "posicao_no_grupo": None,
+        "nota_tri": None,
+        "nivel": NIVEL_AUSENTE,
+        "ausente": True,
+    }
 
 
 def _resumo(notas: np.ndarray, acertos: np.ndarray, thetas: np.ndarray) -> dict[str, float]:
@@ -98,14 +142,24 @@ def _processar_area(
     fim: int,
     alunos: Sequence[Mapping[str, Any]],
     tabela: TabelaReferenciaTRI,
+    ausentes: Sequence[set[str]],
+    ano_referencia: Optional[int] = None,
 ) -> tuple[Optional[dict[str, Any]], dict[int, dict[str, Any]], list[str]]:
-    sel = [i for i, a in enumerate(alunos) if (a.get("fez_area") or {}).get(area, True)]
+    dia = DIA_DA_AREA[area]
+    sel = [
+        i for i, a in enumerate(alunos)
+        if (a.get("fez_area") or {}).get(area, True) and dia not in ausentes[i]
+    ]
     if len(sel) < N_MIN_CALIBRACAO:
         aviso = (f"{area}: {len(sel)} aluno(s) fizeram a área; mínimo de {N_MIN_CALIBRACAO} "
                  "para calibrar. Área sem nota.")
         return None, {}, [aviso]
 
-    resp = np.array([alunos[i]["respostas"][ini - 1:fim] for i in sel], dtype=int)
+    # Presente no dia: questão em branco (null) conta como erro.
+    resp = np.array(
+        [[0 if v is None else v for v in alunos[i]["respostas"][ini - 1:fim]] for i in sel],
+        dtype=int,
+    )
     c_livre = len(sel) >= N_MIN_C_LIVRE
     resultado = pipeline_cientifico(
         alunos=[{"aluno_id": str(i), "nome": "", "respostas": linha.tolist()} for i, linha in zip(sel, resp)],
@@ -116,6 +170,7 @@ def _processar_area(
         # A regra é pelo tamanho da coorte da área, decidida acima; o motor
         # não reaplica o próprio limiar de alunos informativos.
         bayes_min_n=0,
+        ano_referencia=ano_referencia,
     )
     params = resultado["parametros_itens"]
     curva = resultado["curva_condicional"]
@@ -130,12 +185,15 @@ def _processar_area(
             "posicao_no_grupo": round(u, 4),
             "nota_tri": float(r["nota_ancorada"]),
             "nivel": r["estado_tri"],
+            "ausente": False,
         }
 
     avisos = []
     bloco = {
         "questoes": [ini, fim],
         "n_alunos": len(sel),
+        "n_ausentes": sum(1 for a in ausentes if dia in a),
+        "execucao": resultado["execucao"],
         "modelo": "3PL c estimado (prior Beta 10,40)" if c_livre else f"3PL c fixo {C_PADRAO}",
         "resumo": _resumo(
             np.array([v["nota_tri"] for v in por_aluno.values()]),
@@ -176,6 +234,7 @@ def processar_simulado_binarizado(
     """Corrige o simulado inteiro, uma calibração independente por área."""
 
     faixas, alunos = _validar(dados)
+    ausentes = [_dias_ausentes(a, faixas) for a in alunos]
     saida_alunos = [
         {
             "id": a.get("id"),
@@ -183,15 +242,22 @@ def processar_simulado_binarizado(
             "nome": a.get("nome"),
             "turma": a.get("turma"),
             "fez_area": {area: bool((a.get("fez_area") or {}).get(area, True)) for area in faixas},
+            "ausente_dia": {dia: dia in ausentes[i] for dia in sorted({DIA_DA_AREA[x] for x in faixas})},
             "areas": {},
         }
-        for a in alunos
+        for i, a in enumerate(alunos)
     ]
     blocos: dict[str, Any] = {}
     avisos: list[str] = []
     for area, (ini, fim) in faixas.items():
-        bloco, por_aluno, avisos_area = _processar_area(area, ini, fim, alunos, tabela)
+        bloco, por_aluno, avisos_area = _processar_area(
+            area, ini, fim, alunos, tabela, ausentes, ano_referencia,
+        )
         avisos.extend(avisos_area)
+        dia = DIA_DA_AREA[area]
+        for i, a in enumerate(saida_alunos):
+            if dia in ausentes[i] and a["fez_area"][area]:
+                a["areas"][area] = _nota_ausente()
         if bloco is None:
             continue
         blocos[area] = bloco
@@ -199,7 +265,10 @@ def processar_simulado_binarizado(
             saida_alunos[i]["areas"][area] = r
 
     for a in saida_alunos:
-        notas = [a["areas"][ar]["nota_tri"] for ar in faixas if ar in a["areas"]]
+        notas = [
+            a["areas"][ar]["nota_tri"] for ar in faixas
+            if ar in a["areas"] and a["areas"][ar]["nota_tri"] is not None
+        ]
         a["media_tri"] = round(float(np.mean(notas)), 1) if notas and len(notas) == len(faixas) else None
 
     return {
@@ -211,6 +280,9 @@ def processar_simulado_binarizado(
             "regra_c": (f"c fixo em {C_PADRAO}; com ≥ {N_MIN_C_LIVRE} alunos na área, c estimado "
                         "por item com prior Beta(10, 40)"),
             "theta": "EAP com prior N(0,1)",
+            "ausencia": ("AUSENTE no dia (LC e CH no dia 1, CN e MT no dia 2) quando presenca[dia] é false "
+                         "ou não há nenhuma marcação no dia; ausente fica fora da calibração e das médias. "
+                         "Em dia presente, null é questão em branco e conta como erro"),
             "ancoragem": ("posição condicional aos acertos u = Φ(w·(θ − m(k))/s(k)), w = min(0,9; n/(n+25)); "
                           f"nota = quantil u das notas oficiais do ENEM {ano_referencia} com k acertos"),
             "escala_referencia": f"ENEM {ano_referencia}",

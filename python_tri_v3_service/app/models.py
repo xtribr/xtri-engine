@@ -1184,6 +1184,13 @@ class AlunoBinarizado(BaseModel):
         default_factory=dict,
         description="Área ausente aqui conta como feita; false exclui o aluno da área",
     )
+    presenca: Optional[Dict[Literal["dia1", "dia2"], bool]] = Field(
+        None,
+        description=(
+            "Opcional. Presença por dia (dia1 = LC e CH, dia2 = CN e MT). false marca o aluno "
+            "como AUSENTE no dia; sem o campo, o dia é ausente quando todas as respostas dele são null"
+        ),
+    )
     acertos: Optional[Dict[str, int]] = Field(None, description="Ignorado; recalculado das respostas")
     respostas: List[Optional[int]] = Field(..., min_length=1, max_length=400)
 
@@ -1228,9 +1235,21 @@ class ResumoAreaBinarizado(BaseModel):
     nota_max: float
 
 
+class ExecucaoArea(BaseModel):
+    """Como a nota da área foi calculada (para gravar junto das notas)."""
+    motor_versao: str = Field(..., description="Hash do commit do motor, ou 'desconhecida'")
+    ano_referencia: Optional[int] = None
+    c_strategy: str
+    em_iteracoes: int
+    em_convergiu: bool
+    processado_em: str = Field(..., description="ISO 8601 no fuso America/Fortaleza")
+
+
 class AreaBinarizado(BaseModel):
     questoes: List[int]
     n_alunos: int
+    n_ausentes: int = 0
+    execucao: ExecucaoArea
     modelo: str
     resumo: ResumoAreaBinarizado
     curva_condicional: Dict[str, Any]
@@ -1238,12 +1257,13 @@ class AreaBinarizado(BaseModel):
 
 
 class NotaAreaBinarizado(BaseModel):
-    acertos: int
-    theta: float
-    se_theta: float
-    posicao_no_grupo: float = Field(..., description="u: posição entre quem teve os mesmos acertos (0,01–0,99)")
-    nota_tri: float
+    acertos: Optional[int] = None
+    theta: Optional[float] = None
+    se_theta: Optional[float] = None
+    posicao_no_grupo: Optional[float] = Field(None, description="u: posição entre quem teve os mesmos acertos (0,01–0,99)")
+    nota_tri: Optional[float] = Field(None, description="null quando o aluno está AUSENTE no dia da área")
     nivel: str
+    ausente: bool = False
 
 
 class ResultadoAlunoBinarizado(BaseModel):
@@ -1252,6 +1272,7 @@ class ResultadoAlunoBinarizado(BaseModel):
     nome: Optional[str] = None
     turma: Optional[str] = None
     fez_area: Dict[str, bool]
+    ausente_dia: Dict[str, bool] = Field(default_factory=dict)
     areas: Dict[str, NotaAreaBinarizado]
     media_tri: Optional[float] = Field(None, description="Média das áreas; null se faltar alguma área")
 
