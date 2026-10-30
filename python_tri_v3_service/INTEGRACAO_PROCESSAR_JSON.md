@@ -12,7 +12,7 @@ pedagógica do ENEM do ano escolhido (padrão: 2023).
 
 ```bash
 cd python_tri_v3_service
-docker compose up --build -d          # porta 5003
+GIT_COMMIT=$(git rev-parse --short=12 HEAD) docker compose up --build -d   # porta 5003
 curl http://localhost:5003/health     # {"status": "online", ...}
 ```
 
@@ -51,7 +51,8 @@ opcional `ano_referencia`:
       "nome": "Nome do Aluno",
       "turma": "EM1AM",
       "fez_area": { "LC": true, "CH": true, "CN": true, "MT": true },
-      "respostas": [0, 0, 1, 1, ...]
+      "presenca": { "dia1": true, "dia2": true },
+      "respostas": [0, 0, 1, null, ...]
     }
   ]
 }
@@ -61,8 +62,9 @@ opcional `ano_referencia`:
 |---|---|
 | `ano_referencia` | Opcional, padrão 2023. Anos válidos: `GET /api/v3/anos-referencia`. 2023 e 2024 usam percentis completos por acertos; os demais, mín/med/máx |
 | `areas` | Faixa `[início, fim]` (1-indexada, inclusiva) de cada área; códigos `LC`, `CH`, `CN`, `MT`. Padrão: o layout ENEM de 180 questões |
-| `alunos[].respostas` | `0` ou `1` em todas as questões das áreas feitas. Áreas não feitas podem vir com `null` |
+| `alunos[].respostas` | `1` = acerto, `0` = erro, `null` = sem marcação (em branco). Num dia em que o aluno esteve presente, `null` conta como erro |
 | `alunos[].fez_area` | `false` tira o aluno da calibração e da nota daquela área. Área ausente conta como feita |
+| `alunos[].presenca` | Opcional. `{"dia1": bool, "dia2": bool}` (dia 1 = LC e CH, dia 2 = CN e MT). `false` marca o aluno como **AUSENTE** no dia, mesmo com respostas. Sem o campo, o dia é ausente quando **todas** as respostas das áreas do dia vêm `null` |
 | `id`, `matricula`, `nome`, `turma` | Opcionais; só são devolvidos. **Recomendação:** envie só `id` e cruze os dados no seu backend |
 | `acertos`, `total_alunos` | Ignorados (recalculados) |
 
@@ -104,6 +106,29 @@ calibrar (áreas abaixo disso ficam sem nota e geram aviso).
 ```
 
 - `alunos` volta **na mesma ordem** da entrada.
+- **Ausentes:** em cada área do dia em que faltou, o aluno sai com
+  `{"nota_tri": null, "nivel": "AUSENTE", "ausente": true}` (acertos, theta e
+  posição também `null`). Ausente não entra na calibração, nem no `resumo` da
+  área, nem na `media_tri` (que fica `null`). `ausente_dia` diz quais dias.
+  Zero acertos **com** marcações é presença: o aluno recebe a nota mínima da
+  turma para 0 acertos.
+- **`execucao`** (em cada área): como a nota foi calculada. Grave junto das notas.
+
+```json
+"execucao": {
+  "motor_versao": "abc123def456",
+  "ano_referencia": 2023,
+  "c_strategy": "bayes",
+  "em_iteracoes": 59,
+  "em_convergiu": true,
+  "processado_em": "2026-10-30T18:40:12-03:00"
+}
+```
+
+  `motor_versao` vem de `XTRI_MOTOR_VERSAO` (definida no build pelo
+  `GIT_COMMIT`) ou do `git` local; sem nenhum dos dois, `"desconhecida"`.
+  `em_convergiu: false` indica que o EM bateu o limite de 500 iterações:
+  confira os avisos antes de publicar. Cada área também traz `n_ausentes`.
 - `media_tri` é `null` quando o aluno não tem nota em todas as áreas enviadas.
 - `nivel`: `AVANCADO` ≥ 700, `PROFICIENTE` ≥ 600, `BASICO` ≥ 500, `ELEMENTAR` ≥ 400, `INICIANTE` < 400.
 - `avisos` lista áreas não calibradas e questões suspeitas (possível erro de gabarito).
@@ -133,9 +158,26 @@ A nota é uma **projeção pedagógica** na escala do ENEM; não é nota oficial
 INEP. A calibração é refeita a cada chamada a partir dos alunos enviados —
 envie a coorte inteira do simulado numa única requisição, não turma por turma.
 
+### Como o backend deve gravar (proposta, pendente de aprovação)
+
+Ainda **não existe** tabela para isso no Supabase; nada foi migrado. Proposta
+para o xtri-gabaritos, a criar só com o ok do responsável:
+
+`tri_execucoes`: `id`, `projeto_id`, `area`, `motor_versao`, `ano_referencia`,
+`c_strategy`, `em_iteracoes`, `em_convergiu`, `n_alunos`, `n_ausentes`,
+`parametros_itens` (jsonb, o array `itens`), `curva_condicional` (jsonb),
+`avisos` (jsonb), `processado_em`, `ativa` (bool).
+
+- As notas por aluno passam a apontar para `tri_execucao_id`.
+- Reprocessar cria uma execução nova e marca a anterior como `ativa = false`,
+  sem apagar. Turma já entregue não é reprocessada sem decisão explícita, e
+  qualquer reprocessamento sai com um relatório de diferença por aluno.
+- Aluno `AUSENTE` grava nota `null`, nunca zero.
+
 ## 4. Desempenho e operação
 
-- ~7 s para 607 alunos × 180 questões numa máquina de desenvolvimento.
+- ~7 s para 607 alunos × 180 questões numa máquina de desenvolvimento;
+  18 a 20 s para 600 alunos × 180 questões num servidor de 4 vCPU (python_tri_v4).
   O tempo cresce aproximadamente linear com o número de alunos.
 - A rota é síncrona: configure o timeout do cliente HTTP para pelo menos 120 s.
 - O endpoint roda no threadpool do servidor; com `--workers 2` atende
