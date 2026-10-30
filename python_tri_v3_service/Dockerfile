@@ -46,6 +46,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copiar código da aplicação
 COPY app/ ./app/
 
+# Versão do motor gravada em cada execução (bloco "execucao" da resposta).
+# Build: docker build --build-arg GIT_COMMIT=$(git rev-parse --short=12 HEAD) .
+ARG GIT_COMMIT=desconhecida
+ENV XTRI_MOTOR_VERSAO=$GIT_COMMIT
+
 # Criar usuário não-root para segurança
 RUN useradd --create-home appuser \
     && mkdir -p /var/lib/xtri \

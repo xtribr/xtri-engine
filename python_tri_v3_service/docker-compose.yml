@@ -13,6 +13,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # GIT_COMMIT=$(git rev-parse --short=12 HEAD) docker compose up --build
+        GIT_COMMIT: ${GIT_COMMIT:-desconhecida}
     container_name: xtri-tri-v3
     ports:
       - "5003:5003"
